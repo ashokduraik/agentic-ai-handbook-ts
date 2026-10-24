@@ -1,0 +1,57 @@
+# Post 07 — promptfoo: the same golden questions as a declarative, CI-friendly test suite.
+# Run (from 05-evals):  npm run promptfoo   → report in output/promptfoo-results.json; `npx promptfoo view` for the web UI
+# Docs: https://www.promptfoo.dev/docs/intro/
+description: Hospital policy RAG — regression suite
+
+# The "prompt" is just the user question; the provider runs the whole app.
+prompts:
+  - '{{question}}'
+
+providers:
+  - id: file://rag-provider.ts # paths are relative to this file
+    label: rag-app
+
+defaultTest:
+  options:
+    # Model-graded assertions (llm-rubric) use this grader instead of promptfoo's OpenAI default.
+    provider: file://judge-provider.ts
+  assert:
+    - type: latency
+      threshold: 60000 # ms, generous for local CPU models
+    - type: javascript # deterministic: every answerable reply must carry valid citations
+      value: '!context.metadata?.answerable || context.metadata?.citationsValid === true'
+      metric: citations
+
+tests:
+  - description: no-show deposit
+    vars: { question: 'After how many no-shows is a deposit required, and how much is it?' }
+    assert:
+      - type: icontains-any
+        value: ['three', '3']
+      - type: icontains
+        value: '100'
+      - type: llm-rubric
+        value: States that three no-shows within 12 months require a SAR 100 deposit per booking.
+        metric: correctness
+
+  - description: ICU visiting for children
+    vars: { question: 'Can a 9 year old visit their grandfather in the ICU?' }
+    assert:
+      - type: llm-rubric
+        value: Says children under 12 may NOT visit the ICU unless the charge nurse approves. Fail if it says they can visit by default.
+        metric: correctness
+
+  - description: discharge time
+    vars: { question: 'By what time should a discharged patient leave the room?' }
+    assert:
+      - type: icontains-any
+        value: ['13:00', '1 pm', '1pm']
+
+  - description: out-of-scope question must be refused, not invented
+    vars: { question: 'How much does hospital parking cost per hour?' }
+    assert:
+      - type: javascript
+        value: 'context.metadata?.answerable === false'
+        metric: refusal
+      - type: not-regex
+        value: 'SAR\s*\d+|\d+\s*riyal'

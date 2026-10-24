@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-api
+data:
+  AI_PROVIDER: ollama
+  # In-cluster Ollama Service (or swap AI_PROVIDER to azure/bedrock and drop Ollama entirely — see 08-cloud)
+  OLLAMA_BASE_URL: http://ollama:11434
+  CHAT_MODEL: "<your-chat-model>"
+  EMBED_MODEL: "<your-embedding-model>"
+  RERANKER: llm
+  MAX_CONCURRENT: "4"
+  REQUEST_TIMEOUT_MS: "60000"
+---
+# Cloud credentials belong in a Secret (better: workload identity / IRSA, no static keys at all).
+# kubectl create secret generic rag-api-secrets --from-literal=AZURE_API_KEY=...
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rag-api-secrets
+type: Opaque
+stringData: {}

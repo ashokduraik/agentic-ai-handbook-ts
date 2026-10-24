@@ -1,0 +1,47 @@
+{
+  "name": "@learn/07-observability",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "post:01": "tsx 01-traces-and-spans/example.ts",
+    "post:02": "tsx 02-genai-semantic-conventions/example.ts",
+    "post:03": "tsx 03-ai-sdk-telemetry/example.ts",
+    "post:04": "tsx 04-tokens-latency-cost/example.ts",
+    "post:05": "tsx 05-tracing-a-rag-pipeline/example.ts",
+    "post:06": "tsx 06-backends-jaeger-and-langfuse/example.ts",
+    "post:02:offline": "tsx 02-genai-semantic-conventions/example.ts --offline",
+    "post:03:offline": "tsx 03-ai-sdk-telemetry/example.ts --offline",
+    "post:04:offline": "tsx 04-tokens-latency-cost/example.ts --offline",
+    "post:05:offline": "tsx 05-tracing-a-rag-pipeline/example.ts --offline",
+    "post:06:offline": "tsx 06-backends-jaeger-and-langfuse/example.ts --offline",
+    "test:offline": "tsx 01-traces-and-spans/example.ts && tsx 02-genai-semantic-conventions/example.ts --offline && tsx 03-ai-sdk-telemetry/example.ts --offline && tsx 04-tokens-latency-cost/example.ts --offline && tsx 05-tracing-a-rag-pipeline/example.ts --offline && tsx 06-backends-jaeger-and-langfuse/example.ts --offline",
+    "jaeger": "docker compose -f docker-compose.jaeger.yaml up -d",
+    "manual": "tsx 02-genai-semantic-conventions/example.ts",
+    "ai-sdk": "tsx 03-ai-sdk-telemetry/example.ts",
+    "rag": "tsx 05-tracing-a-rag-pipeline/example.ts",
+    "check:links": "node scripts/check-links.mjs"
+  },
+  "dependencies": {
+    "@learn/shared": "1.0.0",
+    "ai": "7.0.148",
+    "zod": "4.6.7",
+    "@ai-sdk/otel": "1.0.148",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/sdk-trace-node": "2.12.0",
+    "@opentelemetry/sdk-trace-base": "2.12.0",
+    "@opentelemetry/resources": "2.12.0",
+    "@opentelemetry/semantic-conventions": "1.43.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.223.0",
+    "@langfuse/otel": "6.0.2",
+    "@opentelemetry/core": "2.12.0",
+    "@learn/rag": "1.0.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.223.0",
+    "@opentelemetry/otlp-exporter-base": "0.223.0"
+  },
+  "exports": {
+    "./tracing": "./01-traces-and-spans/tracing.ts",
+    "./mock": "./support/mock.ts"
+  }
+}

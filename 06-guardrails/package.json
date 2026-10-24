@@ -1,0 +1,37 @@
+{
+  "name": "@learn/06-guardrails",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "post:01": "tsx 01-threats-and-owasp/example.ts",
+    "post:02": "tsx 02-validate-and-repair/example.ts",
+    "post:03": "tsx 03-tool-argument-checks/example.ts",
+    "post:04": "tsx 04-timeouts-and-retries/example.ts",
+    "post:05": "tsx 05-circuit-breaker/example.ts",
+    "post:06": "tsx 06-fallback-chain/example.ts",
+    "post:07": "tsx 07-tool-allow-lists/example.ts",
+    "post:08": "tsx 08-approval-policies/example.ts",
+    "post:09": "tsx 09-input-and-output-guards/example.ts",
+    "post:10": "tsx 10-red-teaming/example.ts",
+    "post:01:offline": "tsx 01-threats-and-owasp/example.ts --offline",
+    "post:02:offline": "tsx 02-validate-and-repair/example.ts --offline",
+    "post:03:offline": "tsx 03-tool-argument-checks/example.ts --offline",
+    "post:04:offline": "tsx 04-timeouts-and-retries/example.ts --offline",
+    "post:05:offline": "tsx 05-circuit-breaker/example.ts --offline",
+    "post:06:offline": "tsx 06-fallback-chain/example.ts --offline",
+    "post:07:offline": "tsx 07-tool-allow-lists/example.ts --offline",
+    "post:08:offline": "tsx 08-approval-policies/example.ts --offline",
+    "test:offline": "tsx 01-threats-and-owasp/example.ts --offline && tsx 02-validate-and-repair/example.ts --offline && tsx 03-tool-argument-checks/example.ts --offline && tsx 04-timeouts-and-retries/example.ts --offline && tsx 05-circuit-breaker/example.ts --offline && tsx 06-fallback-chain/example.ts --offline && tsx 07-tool-allow-lists/example.ts --offline && tsx 08-approval-policies/example.ts --offline && tsx 09-input-and-output-guards/example.ts",
+    "redteam:static": "cd 10-red-teaming && NODE_OPTIONS=--import=tsx PROMPTFOO_DISABLE_TELEMETRY=1 promptfoo eval -c promptfooconfig.injection.yaml --no-cache -j 1",
+    "redteam": "cd 10-red-teaming && NODE_OPTIONS=--import=tsx PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_REMOTE_GENERATION=true promptfoo redteam run -c promptfooconfig.redteam.yaml -o redteam.generated.yaml --no-cache -j 1",
+    "check:links": "node scripts/check-links.mjs"
+  },
+  "dependencies": {
+    "@learn/shared": "1.0.0",
+    "ai": "7.0.148",
+    "zod": "4.6.7",
+    "promptfoo": "0.124.1"
+  }
+}

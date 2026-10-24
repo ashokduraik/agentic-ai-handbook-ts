@@ -1,0 +1,8 @@
+# Local trace UI. Start:  docker compose -f docker-compose.jaeger.yaml up -d
+# Then run any example with TRACE_EXPORTER=otlp and open http://localhost:16686
+services:
+  jaeger:
+    image: jaegertracing/jaeger:2.22.0
+    ports:
+      - "16686:16686" # UI
+      - "4318:4318"   # OTLP/HTTP (what our exporter uses)

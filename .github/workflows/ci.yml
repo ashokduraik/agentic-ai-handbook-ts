@@ -1,0 +1,102 @@
+# CI for the learning repo (topic 09). GitHub only runs workflows from the repo-root .github/ folder.
+#
+#   checks  — every push/PR: install, type-check all workspaces, run every offline test (no model needed),
+#             validate the k8s manifests.
+#   evals   — runs the RAG eval suite (05) against a real model served by an Ollama service container,
+#             and FAILS the build if quality drops below EVAL_THRESHOLD. Model names come from repository
+#             variables (Settings → Secrets and variables → Actions → Variables):
+#               CI_CHAT_MODEL, CI_EMBED_MODEL  (required — job is skipped if unset; pick small models for CI)
+#               EVAL_THRESHOLD                 (optional, default 0.6)
+#   image   — builds the 09-deployment container image (push is left as an exercise: add a registry login).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    env:
+      # Offline tests never call a model, but shared/env.ts requires these to be set.
+      CHAT_MODEL: offline-placeholder
+      EMBED_MODEL: offline-placeholder
+      PROMPTFOO_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:offline
+      - name: Validate Kubernetes manifests
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          ./kubeconform -strict -summary 09-deployment/k8s/*.yaml
+
+  evals:
+    needs: checks
+    if: vars.CI_CHAT_MODEL != '' && vars.CI_EMBED_MODEL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      ollama:
+        image: ollama/ollama:0.40.8
+        ports: ["11434:11434"]
+    env:
+      AI_PROVIDER: ollama
+      OLLAMA_BASE_URL: http://localhost:11434
+      CHAT_MODEL: ${{ vars.CI_CHAT_MODEL }}
+      EMBED_MODEL: ${{ vars.CI_EMBED_MODEL }}
+      EVAL_THRESHOLD: ${{ vars.EVAL_THRESHOLD || '0.6' }}
+      RERANKER: none # keep CI fast; evaluate the reranker separately
+      PROMPTFOO_DISABLE_TELEMETRY: "1"
+      PROMPTFOO_DISABLE_REMOTE_GENERATION: "true"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - name: Pull models into the Ollama service
+        run: |
+          for m in "$CHAT_MODEL" "$EMBED_MODEL"; do
+            curl -sf http://localhost:11434/api/pull -d "{\"model\":\"$m\",\"stream\":false}"
+          done
+      - name: RAG evals (quality gate)
+        run: npm run evals:fast -w 05-evals # exits 1 when overall score < EVAL_THRESHOLD
+      - name: promptfoo assertions
+        run: npm run promptfoo -w 05-evals
+        # promptfoo exits 100 when any test fails. Start non-blocking with small CI models;
+        # set this to false once your chosen model passes reliably.
+        continue-on-error: true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: eval-reports
+          path: 05-evals/output/
+
+  image:
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: 09-deployment/Dockerfile
+          push: false
+          tags: rag-api:${{ github.sha }}

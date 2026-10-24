@@ -1,0 +1,32 @@
+{
+  "name": "@learn/01-foundations",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "post:00": "tsx 00-course-toolkit/example.ts",
+    "post:01": "tsx 01-llm-and-tokens/example.ts",
+    "post:02": "tsx 02-context-window/example.ts",
+    "post:03": "tsx 03-model-calls-and-streaming/example.ts",
+    "post:04": "tsx 04-prompting/example.ts",
+    "post:05": "tsx 05-context-engineering/example.ts",
+    "post:06": "tsx 06-embeddings/example.ts",
+    "post:07": "tsx 07-structured-output/example.ts",
+    "post:08": "tsx 08-tool-calling/example.ts",
+    "post:01:offline": "tsx 01-llm-and-tokens/example.ts --offline",
+    "post:02:offline": "tsx 02-context-window/example.ts --offline",
+    "post:04:offline": "tsx 04-prompting/example.ts --offline",
+    "post:05:offline": "tsx 05-context-engineering/example.ts --offline",
+    "post:06:offline": "tsx 06-embeddings/example.ts --offline",
+    "post:07:offline": "tsx 07-structured-output/example.ts --offline",
+    "test:offline": "tsx 01-llm-and-tokens/example.ts --offline && tsx 02-context-window/example.ts --offline && tsx 04-prompting/example.ts --offline && tsx 05-context-engineering/example.ts --offline && tsx 06-embeddings/example.ts --offline && tsx 07-structured-output/example.ts --offline",
+    "check:links": "node scripts/check-links.mjs"
+  },
+  "dependencies": {
+    "@learn/shared": "1.0.0",
+    "ai": "7.0.148",
+    "zod": "4.6.7",
+    "js-tiktoken": "1.0.21"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@learn/09-deployment",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "post:01": "tsx 01-validate-at-the-edge/example.ts",
+    "post:02": "tsx 02-timeouts-that-abort/example.ts",
+    "post:03": "tsx 03-load-shedding/example.ts",
+    "post:04": "tsx 04-health-and-readiness/example.ts",
+    "post:05": "tsx 05-graceful-shutdown/example.ts",
+    "post:06": "tsx 06-the-rag-service/example.ts",
+    "post:07": "tsx 07-container-image/example.ts",
+    "post:08": "tsx 08-kubernetes/example.ts",
+    "post:09": "tsx 09-ci-eval-gate/example.ts",
+    "post:02:offline": "tsx 02-timeouts-that-abort/example.ts --offline",
+    "post:04:offline": "tsx 04-health-and-readiness/example.ts --offline",
+    "post:06:offline": "tsx 06-the-rag-service/example.ts --offline",
+    "post:09:offline": "tsx 09-ci-eval-gate/example.ts --offline",
+    "test:offline": "tsx 01-validate-at-the-edge/example.ts && tsx 02-timeouts-that-abort/example.ts --offline && tsx 03-load-shedding/example.ts && tsx 04-health-and-readiness/example.ts --offline && tsx 05-graceful-shutdown/example.ts && tsx 06-the-rag-service/example.ts --offline && tsx 07-container-image/example.ts && tsx 08-kubernetes/example.ts && tsx 09-ci-eval-gate/example.ts --offline",
+    "start": "node 06-the-rag-service/server.ts",
+    "docker:build": "tsx 07-container-image/example.ts --build",
+    "check:links": "node scripts/check-links.mjs"
+  },
+  "dependencies": {
+    "@learn/shared": "1.0.0",
+    "ai": "7.0.148",
+    "zod": "4.6.7",
+    "@learn/rag": "1.0.0"
+  }
+}

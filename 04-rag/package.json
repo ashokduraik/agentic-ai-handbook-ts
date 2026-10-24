@@ -1,0 +1,38 @@
+{
+  "name": "@learn/rag",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "post:01": "tsx 01-why-rag/example.ts",
+    "post:02": "tsx 02-chunking/example.ts",
+    "post:03": "tsx 03-embeddings-vector-search/example.ts",
+    "post:04": "tsx 04-vector-store-sqlite/example.ts",
+    "post:05": "tsx 05-hybrid-search/example.ts",
+    "post:06": "tsx 06-reranking/example.ts",
+    "post:07": "tsx 07-grounded-answers-citations/example.ts",
+    "post:08": "tsx 08-full-pipeline/example.ts ask",
+    "post:01:offline": "tsx 01-why-rag/example.ts --offline",
+    "post:03:offline": "tsx 03-embeddings-vector-search/example.ts --offline",
+    "post:04:offline": "tsx 04-vector-store-sqlite/example.ts --offline",
+    "post:05:offline": "tsx 05-hybrid-search/example.ts --offline",
+    "post:06:offline": "tsx 06-reranking/example.ts --offline",
+    "post:07:offline": "tsx 07-grounded-answers-citations/example.ts --offline",
+    "ingest": "tsx 08-full-pipeline/example.ts ingest",
+    "search": "tsx 08-full-pipeline/example.ts search",
+    "ask": "tsx 08-full-pipeline/example.ts ask",
+    "test:pipeline": "tsx pipeline/offline-test.ts",
+    "test:offline": "tsx pipeline/offline-test.ts && tsx 01-why-rag/example.ts --offline && tsx 02-chunking/example.ts && tsx 03-embeddings-vector-search/example.ts --offline && tsx 04-vector-store-sqlite/example.ts --offline && tsx 05-hybrid-search/example.ts --offline && tsx 06-reranking/example.ts --offline && tsx 07-grounded-answers-citations/example.ts --offline",
+    "check:links": "node scripts/check-links.mjs"
+  },
+  "dependencies": {
+    "@learn/shared": "1.0.0",
+    "ai": "7.0.148",
+    "zod": "4.6.7"
+  },
+  "exports": {
+    ".": "./pipeline/rag.ts",
+    "./offline-fakes": "./pipeline/offline-fakes.ts"
+  }
+}

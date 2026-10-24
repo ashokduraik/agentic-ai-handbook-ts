@@ -1,0 +1,36 @@
+{
+  "name": "agentic-ai-handbook-ts",
+  "private": true,
+  "type": "module",
+  "description": "Hands-on agentic AI / LLM engineering course in TypeScript (Node 22+). One workspace per topic.",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "workspaces": [
+    "shared",
+    "01-foundations-structured-output",
+    "02-agents-langgraph",
+    "03-mcp",
+    "04-rag",
+    "05-evals",
+    "06-guardrails",
+    "07-observability",
+    "08-cloud",
+    "09-deployment",
+    "10-capstone"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:offline": "npm run test:offline --workspaces --if-present",
+    "check:ollama": "tsx shared/src/check-ollama.ts"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.28.2": true
+  }
+}

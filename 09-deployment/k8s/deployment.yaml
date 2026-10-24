@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-api
+  labels: { app: rag-api }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: rag-api }
+  template:
+    metadata:
+      labels: { app: rag-api }
+    spec:
+      terminationGracePeriodSeconds: 30 # the app hard-stops at 25s (post 05); LLM answers can take a while
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: api
+          image: ghcr.io/your-org/rag-api:latest # CI pushes an immutable tag (git SHA); pin that in real envs
+          ports:
+            - { name: http, containerPort: 8080 }
+          envFrom:
+            - configMapRef: { name: rag-api }
+            - secretRef: { name: rag-api-secrets }
+          # The pod itself is light — the model does the heavy lifting (in Ollama/GPU nodes or a cloud API).
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          livenessProbe: # "is the process wedged?" — keep it cheap, never call the model here
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          readinessProbe: # "can it serve?" — index loaded + model backend reachable
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          startupProbe: # first boot ingests docs (embeddings) — give it time before liveness kicks in
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp } # RAG_DB_PATH lives here (rebuilt on start)
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-api
+spec:
+  selector: { app: rag-api }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+# Scale on CPU as a starting point. For LLM services, in-flight requests / queue depth (custom
+# metric via KEDA or Prometheus Adapter) is a better signal than CPU — the pod mostly waits on the model.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rag-api
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: rag-api }
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: rag-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: rag-api }

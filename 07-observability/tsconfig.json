@@ -1,0 +1,1 @@
+{ "extends": "../tsconfig.base.json", "include": ["*/example.ts", "01-traces-and-spans/tracing.ts", "support"] }
