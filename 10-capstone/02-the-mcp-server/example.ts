@@ -26,7 +26,10 @@ await client.connect(
 try {
   // 2. Every tool says whether it only reads, or writes (and whether the write is destructive).
   section('[A] Tools and their annotations');
-  for (const t of (await client.listTools()).tools) {
+  const listed = await client.listTools();
+  // Just the fields this post needs: each tool's `name` and `annotations` (readOnlyHint / destructiveHint),
+  // which posts 04 and 05 rely on. The full listTools() shape (inputSchema and all) is in lesson 03, post 01.
+  for (const t of listed.tools) {
     const a = t.annotations ?? {};
     const kind = a.readOnlyHint ? 'read-only' : a.destructiveHint ? 'WRITE, destructive' : 'WRITE';
     console.log(`  ${t.name.padEnd(20)} ${kind.padEnd(20)} ${t.description}`);
@@ -34,17 +37,24 @@ try {
 
   // 3. Tools return compact projections: ids the model can pass to the next tool.
   section('[B] search_patients({ name: "Fatima" })');
-  console.log(' ', textOf(await client.callTool({ name: 'search_patients', arguments: { name: 'Fatima' } })));
+  const found = await client.callTool({ name: 'search_patients', arguments: { name: 'Fatima' } });
+  // `content` is a list of parts, and the JSON is inside a text part (full callTool() shape: lesson 03, post 02).
+  console.log(`  isError=${found.isError}  ${textOf(found)}`);
 
   // 4. The server checks the care team itself, whatever the host or model asked for.
   section('[C] get_patient_summary for a patient outside the care team');
   const denied = await client.callTool({ name: 'get_patient_summary', arguments: { patientId: 'P-002' } });
+  // A refusal is a normal result with `isError: true`, not a thrown error, so the model can read it.
   console.log(`  isError=${denied.isError}  ${textOf(denied)}`);
 
   // 5. Resources are raw data for the host app to read; the model doesn't call them.
   section('[D] Resource fhir://Patient/P-003');
   const res = await client.readResource({ uri: 'fhir://Patient/P-003' });
-  console.log(' ', (res.contents[0] as { text: string }).text.slice(0, 120), '…');
+  // Notice `contents[].uri` and `mimeType`, and that `text` is the raw FHIR JSON (full readResource() shape:
+  // lesson 03, post 03).
+  const first = res.contents[0] as { uri: string; mimeType?: string; text: string };
+  console.log(`  ${first.uri} (${first.mimeType})`);
+  console.log(' ', first.text.slice(0, 120), '…');
 } finally {
   await client.close();
 }

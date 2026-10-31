@@ -13,7 +13,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { generateText, type ModelMessage } from 'ai';
 import { z } from 'zod';
-import { chatModel, modelLabel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, modelLabel, section, stripThinking } from '@learn/shared';
 
 const server = new McpServer({ name: 'clinic-prompts', version: '1.0.0' });
 
@@ -43,7 +43,11 @@ const client = new Client({ name: 'prompts-demo', version: '1.0.0' });
 await client.connect(clientSide);
 
 section('1. Discover and fill a prompt (no model)');
-const { prompts } = await client.listPrompts();
+const listedPrompts = await client.listPrompts();
+const { prompts } = listedPrompts;
+// The full prompts/list result. Notice: `arguments` is a list of { name, required }, built from the
+// Zod argsSchema: that is the "form" a host UI shows before it calls getPrompt.
+dump('client.listPrompts() result', listedPrompts);
 for (const p of prompts) console.log(`prompt ${p.name}: ${p.description}  args=${p.arguments?.map((a) => a.name).join(', ')}`);
 
 const filled = await client.getPrompt({
@@ -51,6 +55,9 @@ const filled = await client.getPrompt({
   arguments: { patientName: 'Fatima', when: '3 Nov 09:30', doctor: 'Dr. Qureshi' },
 });
 console.log(JSON.stringify(filled.messages, null, 2));
+// The full prompts/get result. Notice: just `messages`, with the arguments already filled in.
+// The server never calls a model; it only hands the host ready-made messages.
+dump('client.getPrompt() result', filled);
 
 if (!process.argv.includes('--offline')) {
   section(`2. Send the filled prompt to the model (${modelLabel()})`);
@@ -59,7 +66,12 @@ if (!process.argv.includes('--offline')) {
     role: m.role,
     content: m.content.type === 'text' ? m.content.text : '',
   }));
-  const { text } = await generateText({ model: chatModel(), messages, maxOutputTokens: 400 });
+  const result = await generateText({ model: chatModel(), messages, maxOutputTokens: 400 });
+  const { text } = result;
+  // Only the fields this post cares about (the full generateText result is in lesson 01, post 00).
+  // Notice: `finishReason` tells you whether the SMS was cut off by maxOutputTokens ('length') or
+  // finished ('stop'), and `usage.inputTokens` is the cost of the server's prompt text.
+  console.log('finishReason:', result.finishReason, '| usage.inputTokens:', result.usage.inputTokens, '| usage.outputTokens:', result.usage.outputTokens);
   const sms = stripThinking(text);
   console.log(`SMS (${sms.length} chars): ${sms}`);
 }

@@ -77,13 +77,17 @@ Lesson 04's real `retrieve` and `answer`. With `--offline`, fake embeddings and 
 async function judge(fn: () => Promise<{ score: number | null }> | { score: number | null }) {
   judgeCalls++;
   try {
-    return (await fn()).score;
+    const result = await fn();
+    // Only the score is kept (the full judge results are in posts 04 and 05); it lands in the report row.
+    return result.score;
   } catch {
     judgeFailures++;
     return null;
   }
 }
 ```
+
+The wrapper keeps only the `score`. We saw the full judge results in [post 04](../04-llm-judge-faithfulness/README.md) (`faithfulness()`) and [post 05](../05-autoevals/README.md) (autoevals), so the harness doesn't dump them again: the score ends up in the report row.
 
 ### Every case: code checks, then judges
 
@@ -95,6 +99,21 @@ if (useJudge && c.answerable) {
 ```
 
 `codeChecks` from post 03, `faithfulness` from post 04, autoevals from post 05. Judges only run on answerable cases (a refusal has no claims to check).
+
+### Look inside one case
+
+```ts
+if (first) dump(`runApp() result for "${c.id}"`, r);
+```
+
+```ts
+if (first) dump(`report row for "${c.id}"`, row);
+```
+
+For the first case, the harness uses the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) to print what went in and what came out. These are the two new shapes of this post:
+
+- **`runApp()` result**: lesson 04's `answer()` fields (`answer`, `citations`, `answerable`, `citationsValid`, `invalidCitations`, `contexts`, the chunks the model saw) plus `sources`, the retrieved files best-first. Every code check reads only these fields, so when a check fails, the reason is in this object.
+- **The report row**: one row of the table, with timings in `ms`. A `null` is a check that doesn't apply, or a judge that failed. It is left out of the averages instead of counting as a pass or a fail.
 
 ### Aggregate
 
@@ -176,6 +195,54 @@ How to read it:
 - **0.77 passes a 0.6 gate**, yet you would not ship this app. The threshold catches regressions; it doesn't certify quality. Read the table.
 
 `evals:fast` on the same models ran in about 10 seconds and scored 0.9; the full run took a few minutes.
+
+Here are the first-case dumps (the app result and the report row) from a later `npm run evals` with the default `RERANKER` (the LLM reranker) and `qwen3:0.6b` as both app and judge (trimmed with "…"; answers, scores and timings change from run to run):
+
+```
+▼ runApp() result for "noshow-deposit"
+{
+  answer: 'The deposit is required after 24 hours of no-show and is usually $50.00',
+  citations: [ 1, 2 ],
+  answerable: true,
+  citationsValid: true,
+  invalidCitations: [],
+  contexts: [
+    {
+      id: 'appointment-cancellation.md#2',
+      source: 'appointment-cancellation.md',
+      heading: 'Outpatient Appointment Cancellation Policy (fictional) › Exceptions',
+      text: 'Medical emergencies and hospital admissions are not counted as no-shows when documented.',
+      score: 10
+    },
+    {
+      id: 'appointment-cancellation.md#0',
+      …
+      score: 10
+    },
+    {
+      id: 'telehealth.md#1',
+      …
+      score: 10
+    }
+  ],
+  sources: [ 'appointment-cancellation.md', 'appointment-cancellation.md', 'telehealth.md' ]
+}
+▼ report row for "noshow-deposit"
+{
+  id: 'noshow-deposit',
+  hit3: true,
+  refusalOk: true,
+  contains: false,
+  containsAll: false,
+  citations: true,
+  faithLocal: 0,
+  faithful: null,
+  factual: null,
+  ms: 14981
+}
+```
+
+The dumps explain the row. `hit3: true` only because the right *file* is in `sources`. The `contexts` show that the reranker gave 10/10 to three chunks and dropped the one with the answer (`appointment-cancellation.md#1`, "three no-shows … SAR 100"). The model then made up "24 hours" and "$50.00": `contains` and `containsAll` fail, and this time the judge caught it (`faithLocal: 0`). Both autoevals judges failed for this case, so `faithful` and `factual` are `null`. That run ended with `overall: 0.76`, 12 of 18 judge calls failed, and the gate passed.
 
 ## Common gotchas
 

@@ -88,6 +88,13 @@ const userHash = createHash('sha256').update('dr-ashok' + 'salt').digest('hex').
 
 These are ordinary span attributes. Langfuse reads them; other backends just store them.
 
+```ts
+console.log(memory.getFinishedSpans()[0]!.attributes); // read before shutdown: shutdown clears the memory exporter
+// Full finished-span shape: lesson 07, post 01.
+```
+
+The attributes are what matter for Langfuse; the full finished-span shape is in [post 01](../01-traces-and-spans/README.md).
+
 ### Step 4 — a score (with keys)
 
 ```ts
@@ -97,6 +104,12 @@ These are ordinary span attributes. Langfuse reads them; other backends just sto
     body: JSON.stringify({ traceId, name: 'clinician-thumbs-up', value: 1, dataType: 'NUMERIC' }),
   });
 ```
+
+```ts
+  dump('score POST response', { status: res.status, statusText: res.statusText, json: await res.json().catch(() => null) });
+```
+
+The HTTP status and Langfuse's JSON reply. If the reply isn't JSON, `json` is `null`.
 
 A score is linked to a trace by the OpenTelemetry trace id. In a real app you'd send it when the clinician clicks 👍, minutes after the request.
 
@@ -121,8 +134,27 @@ TRACE_EXPORTER=langfuse npm run post:03
 ### What you should see
 
 - **A**: `collector received: [ { path: '/v1/traces', type: 'application/x-protobuf', bytes: 408 } ]`.
-- **B**: the span's attributes: `langfuse.trace.name`, `user.id` (a hash), `session.id`, tags, prompt name and version, environment.
-- **C**: `trace … sent; score POST → HTTP 200` (or `[C] skipped` without keys).
+- **B**: the span's attributes: `langfuse.trace.name`, `user.id` (a hash), `session.id`, tags, prompt name and version, environment (real output; the hash differs when the salt changes):
+
+```
+{
+  'langfuse.trace.name': 'discharge-summary',
+  'user.id': 'c64ad5138a30',
+  'session.id': 'ward-7-shift-am',
+  'langfuse.trace.tags': [ 'cardiology', 'beta' ],
+  'langfuse.observation.prompt.name': 'discharge-summary',
+  'langfuse.observation.prompt.version': 3,
+  'langfuse.environment': 'dev'
+}
+```
+
+  The full finished-span shape (including `resource` / `service.name`) is in [post 01](../01-traces-and-spans/README.md). This provider was created without a resource, so OpenTelemetry would make one up from the Node path; `setupTracing` in post 01 sets a real name — always do that, or every service looks the same in your backend.
+- **C**: `trace … sent; score POST → HTTP 200` (or `[C] skipped` without keys), then the response. *Illustrative only: part C was not run for this course (no Langfuse keys). The JSON reply's exact shape comes from Langfuse's API; for a successful score it should include the new score's id.* For example:
+
+```
+▼ score POST response
+{ status: 200, statusText: 'OK', json: { id: '…' } }
+```
 
 **What was tested:** parts A and B, and `TRACE_EXPORTER=otlp` sending post 03's spans to a local test receiver on port 4318. **Not tested:** the Docker Jaeger UI, a real Langfuse account (part C and `TRACE_EXPORTER=langfuse`), and cloud backends. Check Langfuse's current docs if the score API has changed.
 

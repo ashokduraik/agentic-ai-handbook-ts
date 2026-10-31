@@ -87,6 +87,34 @@ Rules:
 
 `callTool` calls a tool directly, without the model: the way tests and evals check the real outcome.
 
+### Step 5 — seeing the results
+
+`ask()` returns an `AgentResult`, a small summary. This is its first appearance in the course, so the first offline check dumps one in full (a booking that was denied); every later scenario prints only the fields it checks (`blocked`, `steps`, `events`, the answer text), and the live run prints the tool activity, the answer, `steps` and `usage`. `dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)).
+
+```ts
+    // The one full AgentResult dump in the course: its first appearance, so every field is shown once. Notice the
+    // book_appointment event with outcome 'denied', and `usage`. Later scenarios print only the fields they check.
+    dump('ask() result (booking without approval)', r);
+```
+
+```ts
+    // Blocked before the model: `blocked` is set, and steps and events are 0 and empty (AgentResult shape: above).
+    console.log(`  blocked: ${r.blocked}, steps: ${r.steps}, events: ${r.events.length}, answer: "${r.answer}"`);
+```
+
+The `generateText()` result behind each answer is **not** printed: its fields were dumped once in [lesson 01, post 00](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned) (tools in [post 08](../../01-foundations-structured-output/08-tool-calling/README.md), and approvals in [post 05](../05-human-approval/README.md)). Printing it for every ask would run to hundreds of lines. If you want to look at it anyway, `createAgent` takes an optional `onModelResult` callback. `agent.ts` only calls it when you pass one, so evals and the tracing post don't print anything extra, and neither does the example by default:
+
+```ts
+  /** Optional, and unused by default: called with the full generateText() result of each ask(), e.g. to print it while learning. */
+  onModelResult?: (result: Awaited<ReturnType<typeof generateText>>) => void;
+```
+
+```ts
+        opts.onModelResult?.(r);
+```
+
+To turn it on, pass it where `example.ts` calls `createAgent` for the live run (the example has this as a comment, disabled): `onModelResult: (result) => dump('generateText() result', result)`.
+
 ---
 
 ## Run it
@@ -107,14 +135,63 @@ npm run ask -- --role clinician "Show Rahul Menon's medications"
 Offline:
 
 ```
+▼ ask() result (booking without approval)
+{
+  answer: 'Done.',
+  events: [
+    {
+      tool: 'search_patients',
+      input: { name: 'Fatima Al-Harbi' },
+      outcome: 'ok',
+      detail: '{"content":[{"type":"text","text":"[{\\"id\\":\\"P-001\\",\\"name\\":\\"Fatima Al-Harbi\\",\\"birthYear\\":\\"1961\\"}]"}],"isError":false}'
+    },
+    …
+    {
+      tool: 'book_appointment',
+      input: { patientId: 'P-001', slotId: 'S-1', reason: 'BP follow-up' },
+      outcome: 'denied',
+      detail: 'needs human approval'
+    }
+  ],
+  steps: 4,
+  usage: { input: 168, output: 28 }
+}
 ✅ receptionist sees 4 tools; booking denied without approval, nothing in the store
 ✅ approved booking is in the store (checked with a direct tool call)
 ✅ patient outside the care team blocked
 ✅ tool result redacted; dosing advice replaced with: "I can help with scheduling, but medication questions need a clinician or pharmacist."
+  blocked: possible prompt injection, steps: 0, events: 0, answer: "Sorry, I can’t help with that request."
 ✅ prompt injection blocked by the input guard
 ```
 
-Live on the box (`qwen3:0.6b`), every safety rule held, and the small model struggled with the task:
+What the `AgentResult` fields mean (`blocked`, `steps` and `events` appear again in the prompt-injection line above, where the question never reaches the model):
+
+| Field | What it tells you |
+|---|---|
+| `events[]` | One per tool call: `tool`, the model's `input`, an `outcome` (`ok`, `error` or `denied`) and `detail`, the result cut to 200 characters (which is why one ends in `practition`). |
+| `blocked` | Only set when the input guard stopped the question; then `steps` and `usage` are 0, because no model was called. |
+| `steps` | Model turns. The scripted booking takes 4: three tool calls, then the text. |
+| `usage` | Total tokens over all steps. The scripted model reports made-up counts; a real model's are real. |
+
+Live (`npm run ask` and `npm run ask -- --approve`, `qwen3.8:latest`), the run prints the tool activity, the answer and `steps`/`usage`. Tool results are cut to 120 characters in the activity lines, so they end mid-word:
+
+```
+── receptionist · ollama:qwen3.8:latest · approve=false · tools: search_patients, find_slots, list_appointments, book_appointment ──
+Q: Book Fatima Al-Harbi the earliest cardiology slot for a blood-pressure follow-up.
+
+── Tool activity ──
+  ok     search_patients({"name":"Fatima Al-Harbi"}) → {"content":[{"type":"text","text":"[{\"id\":\"P-001\",\"name\":\"Fatima Al-Harbi\",\"birthYear\":\"1961\"}]"}],"isError"
+  ok     find_slots({"specialty":"cardiology"}) → {"content":[{"type":"text","text":"[{\"slotId\":\"S-1\",\"start\":\"2026-10-25T09:00:00+03:00\",\"practitioner\":\"Dr. S
+  denied book_appointment({"patientId":"P-001","slotId":"S-1","reason":"blood-pressure follow-up"}) → needs human approval
+
+── Answer ──
+I can't complete this booking right now — the system requires human approval. Please have a supervisor authorize it, then I can retry.
+{ steps: 4, usage: { input: 3197, output: 150 } }
+```
+
+With `--approve`, the same three calls ran and the booking was `ok`: the activity line ends with `{"appointmentId":"APT-1","status":"booked",…`, and the answer said `Booked Fatima Al-Harbi for the earliest cardiology slot on 2026-10-25 at 09:00 (Asia/Riyadh) with Dr. Salem for a blood-pressure follow-up (APT-1).` (`steps: 4`, `usage: { input: 3246, output: 177 }`). Token counts and wording change between runs.
+
+From earlier live runs on a smaller model (`qwen3:0.6b`), every safety rule held, and the model struggled with the task:
 
 - **No approval:** it called `book_appointment` with `patientId: "Fatima Al-Harbi"` straight away. Denied; the answer said approval was needed.
 - **With `--approve`:** it passed the *tool names* as ids (`patientId: "search_patients"`, `slotId: "find_slots"`). The host answered `FORBIDDEN`, nothing was booked, and the answer said so.

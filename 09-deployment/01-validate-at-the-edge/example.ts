@@ -13,7 +13,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { z } from 'zod';
-import { isMain, section } from '@learn/shared';
+import { dump, isMain, section } from '@learn/shared';
 
 /** An error that knows its HTTP status, so the handler can answer 400/413/504 instead of 500. */
 export class HttpError extends Error {
@@ -51,9 +51,17 @@ export async function readJson(req: IncomingMessage, limitBytes = 16_384): Promi
 // ---- the demo (skipped when another file imports from here) -----------------------------------
 if (isMain(import.meta.url)) {
   // 3. The handler: read, validate, and answer with a clear error. Never a stack trace.
+  const shownParse = new Set<boolean>(); // which safeParse() shapes (success / failure) were already dumped
   const server = createServer(async (req, res) => {
     try {
       const parsed = AskBody.safeParse(await readJson(req));
+      // Server side: the full safeParse() result, once per shape (first success, first failure). Notice
+      // `data.question` arrives already trimmed, and a failure carries a ZodError whose `issues` say which
+      // field failed and why (code, path, message). Later requests show up in the summary lines below.
+      if (!shownParse.has(parsed.success)) {
+        shownParse.add(parsed.success);
+        dump('server: AskBody.safeParse() result', parsed);
+      }
       if (!parsed.success) return send(res, 400, { error: 'invalid request', issues: z.flattenError(parsed.error).fieldErrors });
       send(res, 200, { ok: true, question: parsed.data.question }); // post 06 calls the model here
     } catch (e) {
@@ -63,8 +71,16 @@ if (isMain(import.meta.url)) {
   });
   await new Promise<void>((r) => server.listen(0, r));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/ask`;
+  let firstResponse = true;
   const post = async (label: string, body: string) => {
     const r = await fetch(url, { method: 'POST', body });
+    if (firstResponse) {
+      firstResponse = false;
+      // Client side: the first HTTP response in full. Notice `status`, the content-type header, and that the
+      // JSON never contains a stack trace. (clone() leaves the body readable for the line below.) Every
+      // later request prints just `status` and `json` in its summary line.
+      dump(`client: HTTP response (${label})`, { status: r.status, statusText: r.statusText, httpHeaders: Object.fromEntries(r.headers), json: await r.clone().json() });
+    }
     console.log(`  ${label.padEnd(26)} → ${r.status} ${JSON.stringify(await r.json())}`);
     return r.status;
   };

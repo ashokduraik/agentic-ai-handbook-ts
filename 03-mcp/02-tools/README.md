@@ -113,6 +113,33 @@ const bad = await client.callTool({ name: 'search_slots', arguments: { departmen
 
 A success, a double booking (business error), and an argument outside the enum (validation error).
 
+### The full results
+
+After each call the file prints the whole result with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)):
+
+```ts
+dump('callTool(search_slots) result', found);
+```
+
+```ts
+dump('callTool(book_appointment) — success', ok);
+dump('callTool(book_appointment) — business error', taken);
+```
+
+```ts
+dump('callTool(search_slots, bad args) result', bad);
+```
+
+A `tools/call` result has up to three fields, and these dumps show all of them:
+
+| Field | When | What it's for |
+|---|---|---|
+| `content` | always | A list of typed parts (`{ type: 'text', text }`). This is what the **model** reads. |
+| `structuredContent` | when the tool has an `outputSchema` | The same data as a real object, checked against that schema. This is what **code** reads (`search_slots` returns both: the slots as an object *and* as a JSON string in `content`). |
+| `isError` | on failure | `true` for a business error **and** for invalid arguments. On success the field is simply **absent**, which is why the example prints `ok.isError ?? false`. |
+
+The invalid-arguments call doesn't throw on the client. The SDK validated the arguments against the Zod schema **before** the handler ran, and returned the problem as an ordinary result: `MCP error -32602` (JSON-RPC's "invalid params") followed by the allowed values and the field (`at department`).
+
 ---
 
 ## Run it
@@ -143,6 +170,43 @@ book S-1 for P-002 → isError = true | Slot S-1 is already taken
 
 ── Invalid arguments: rejected by the schema, the handler never runs ──
 isError = true | MCP error -32602: Input validation error: Invalid arguments for tool search_slots: Invalid option: expected one of "cardiology"|...
+```
+
+With the dumps (a real run, no model, trimmed at `…`):
+
+```
+first free slot, read by CODE: S-1 2026-11-03T09:30
+▼ callTool(search_slots) result
+{
+  content: [
+    {
+      type: 'text',
+      text: '[{"id":"S-1","doctor":"Dr. Qureshi","start":"2026-11-03T09:30"},{"id":"S-2","doctor":"Dr. Qureshi","start":"2026-11-04T11:00"}]'
+    }
+  ],
+  structuredContent: {
+    slots: [
+      { id: 'S-1', doctor: 'Dr. Qureshi', start: '2026-11-03T09:30' },
+      { id: 'S-2', doctor: 'Dr. Qureshi', start: '2026-11-04T11:00' }
+    ]
+  }
+}
+…
+▼ callTool(book_appointment) — success
+{ content: [ { type: 'text', text: 'Booked A-101 (slot S-1) for P-001.' } ] }
+▼ callTool(book_appointment) — business error
+{ content: [ { type: 'text', text: 'Slot S-1 is already taken' } ], isError: true }
+…
+▼ callTool(search_slots, bad args) result
+{
+  content: [
+    {
+      type: 'text',
+      text: 'MCP error -32602: Input validation error: Invalid arguments for tool search_slots: Invalid option: expected one of "cardiology"|"orthopedics"|"pediatrics"|"general-medicine" at department'
+    }
+  ],
+  isError: true
+}
 ```
 
 ## Common gotchas

@@ -76,6 +76,12 @@ The `ATTR_GEN_AI_*` constants come from `@opentelemetry/semantic-conventions/inc
 
 What *happened* (finish reason, token usage) is added after the call.
 
+```ts
+        console.log(`finishReason=${r.finishReason} inputTokens=${r.usage.inputTokens} outputTokens=${r.usage.outputTokens}`);
+```
+
+We log only the fields each attribute comes from: `r.finishReason` and `r.usage.inputTokens` / `outputTokens`. The full result is in [lesson 01, post 00](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned).
+
 ### Step 3 — content, only when allowed
 
 ```ts
@@ -100,6 +106,16 @@ The messages are stored as JSON, in the conventions' `role` + `parts` shape.
 
 Three things: the exception (with stack trace) as a span event, `error.type` for grouping, and the ERROR status. Then re-throw: tracing records errors, it doesn't swallow them.
 
+```ts
+        dump(`finished span "chat ${modelName}"`, span);
+```
+
+```ts
+  console.log('error name (became error.type):', (e as Error).name, '  statusCode:', (e as { statusCode?: number }).statusCode);
+```
+
+The `finally` block dumps the finished span after every call, successful or not: this is the first OpenTelemetry-shaped object with `gen_ai.*` attributes, so we print it in full ([`dump`](../../shared/README.md#dumplabel-value--print-the-full-returned-value)). The caller then logs the `name` of the error it caught, which is the same string the span stored as `error.type`. (The full `APICallError` shape is in [lesson 06, post 04](../../06-guardrails/04-timeouts-and-retries/README.md#step-2--turning-retries-off).)
+
 ---
 
 ## Run it
@@ -115,9 +131,75 @@ OTEL_CAPTURE_CONTENT=true TRACE_EXPORTER=console-raw npm run post:02   # see the
 
 ### What you should see
 
-- **A**: `[span] chat qwen3:0.6b (553 ms) operation.name="chat" provider.name="ollama" request.model="qwen3:0.6b" response.finish_reasons=["stop"] usage.input_tokens=31 usage.output_tokens=17`, then the answer.
-- **B**: `[span] chat this-model-does-not-exist (24 ms) ❌ … error.type="AI_APICallError"`, then `caught: Not Found`.
-- With `OTEL_CAPTURE_CONTENT=true` and `console-raw`, the span also has `gen_ai.input.messages` and `gen_ai.output.messages`.
+Live on the box (`qwen3:0.6b`), trimmed with "…". The answer, token counts, ids and times differ between runs. This run took 7 s because the model was loading; a warm call takes about 0.5 s.
+
+```
+── [A] A successful call ───────────────────────────────────────
+finishReason=stop inputTokens=31 outputTokens=23
+[span] chat qwen3:0.6b (7071 ms) operation.name="chat" provider.name="ollama" request.model="qwen3:0.6b" response.finish_reasons=["stop"] usage.input_tokens=31 usage.output_tokens=23
+▼ finished span "chat qwen3:0.6b"
+SpanImpl {
+  duration: [ 7, 70984183 ],
+  …
+  kind: 2,
+  attributes: {
+    'gen_ai.operation.name': 'chat',
+    'gen_ai.provider.name': 'ollama',
+    'gen_ai.request.model': 'qwen3:0.6b',
+    'gen_ai.request.max_tokens': 256,
+    'gen_ai.request.temperature': 0,
+    'gen_ai.response.finish_reasons': [ 'stop' ],
+    'gen_ai.usage.input_tokens': 31,
+    'gen_ai.usage.output_tokens': 23
+  },
+  …
+  name: 'chat qwen3:0.6b',
+  status: { code: 0 },
+  …
+}
+answer: A patient should bring their medical history, current medications, and a list of symptoms to a first clinic visit.
+
+── [B] A failing call (unknown model) → error.type + ERROR status 
+[span] chat this-model-does-not-exist (65 ms) ❌ operation.name="chat" provider.name="ollama" request.model="this-model-does-not-exist" error.type="AI_APICallError"
+▼ finished span "chat this-model-does-not-exist"
+SpanImpl {
+  …
+  attributes: {
+    …
+    'error.type': 'AI_APICallError'
+  },
+  links: [],
+  events: [
+    {
+      name: 'exception',
+      attributes: {
+        'exception.type': 'AI_APICallError',
+        'exception.message': 'Not Found',
+        'exception.stacktrace': 'AI_APICallError: Not Found\n' +
+          …
+      },
+      time: [ 1792857249, 802488562 ],
+      droppedAttributesCount: 0
+    }
+  ],
+  …
+  status: { code: 2, message: 'Not Found' },
+  …
+}
+caught: Not Found
+error name (became error.type): AI_APICallError   statusCode: 404
+```
+
+| Field | What it means |
+| --- | --- |
+| `kind: 2` | CLIENT: we called a remote server. |
+| `attributes` | Every `gen_ai.*` value from steps 1 and 2. They match the result: `finishReason` → `gen_ai.response.finish_reasons`, `usage.inputTokens` → `gen_ai.usage.input_tokens`. |
+| `events[0]` (B) | The `exception` event from `recordException`: type, message and the full stack trace. |
+| `status` (B) | `code: 2` = ERROR, with the error's message. |
+| `error.type` (B) | The error's `name`, `AI_APICallError`. Dashboards group failures by it. |
+| `statusCode` (error) | What Ollama actually answered: a 404 (model not found). The error's other fields (`responseBody`, `isRetryable`) are in [lesson 06, post 04](../../06-guardrails/04-timeouts-and-retries/README.md#step-2--turning-retries-off). |
+
+With `--offline` the answer comes from a scripted model, and part B's error is a `ModelNotFoundError` from a fake model (no `statusCode`, so the log shows `statusCode: undefined`). With `OTEL_CAPTURE_CONTENT=true` and `console-raw`, the span also has `gen_ai.input.messages` and `gen_ai.output.messages`.
 
 ## Common gotchas
 

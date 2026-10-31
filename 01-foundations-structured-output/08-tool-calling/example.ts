@@ -9,7 +9,7 @@
  */
 import { generateText, stepCountIs, tool } from 'ai';
 import { z } from 'zod';
-import { chatModel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, section, stripThinking } from '@learn/shared';
 
 // Data the model cannot know (in real life: your hospital system's API).
 const beds: Record<string, { total: number; occupied: number }> = {
@@ -46,6 +46,22 @@ result.steps.forEach((step, i) => {
   step.toolResults.forEach((r) => console.log(`   code returned: ${JSON.stringify(r.output)}`));
 });
 
+// The raw tool-call and tool-result objects, step by step. Notice: each tool call has a
+// `toolCallId`, the `toolName` and the `input` the model chose; the matching tool result has the
+// SAME `toolCallId`, the same `input`, and the `output` your execute() returned. That id is how
+// the model pairs each answer with its question when several tools run in one step.
+result.steps.forEach((step, i) => {
+  dump(`steps[${i}].toolCalls`, step.toolCalls);
+  dump(`steps[${i}].toolResults`, step.toolResults);
+});
+
 section('[C] Final answer');
 console.log('Model:  ', stripThinking(result.text));
 console.log('Correct: 1 + 8 = 9 free beds   ← compare! Small models can still get the arithmetic wrong.');
+
+// The full result. Notice: `steps` now has MORE than one entry (one per model call), each with
+// its own `finishReason` and `usage`. Top-level `content`, `toolCalls` and `toolResults` collect
+// the parts of ALL steps; `text`, `finishReason` and `response` come from the LAST step; and
+// `usage` / `totalUsage` add up the tokens of every step — the real cost of the whole loop.
+section('[D] The full result object');
+dump('generateText() result with tools', result);

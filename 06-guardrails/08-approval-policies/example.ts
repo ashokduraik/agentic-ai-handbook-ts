@@ -18,7 +18,7 @@
  */
 import { generateText, stepCountIs, tool, type LanguageModel, type ModelMessage } from 'ai';
 import { z } from 'zod';
-import { chatModel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, section, stripThinking } from '@learn/shared';
 import { scriptedModel } from '../support/mock-models.ts';
 
 const careTeam = ['P-001']; // the logged-in doctor's patients
@@ -57,7 +57,7 @@ function printSteps(steps: Awaited<ReturnType<typeof generateText>>['steps']) {
   }
 }
 
-async function ask(model: LanguageModel, messages: ModelMessage[]) {
+async function ask(model: LanguageModel, messages: ModelMessage[], showParts = false) {
   const r = await generateText({
     model,
     tools,
@@ -67,6 +67,21 @@ async function ask(model: LanguageModel, messages: ModelMessage[]) {
     messages,
   });
   printSteps(r.steps);
+  // Every tool and approval part, in full, for A1 and A2 only (the two shapes: decided by the policy,
+  // and waiting for a human). Notice `tool-approval-request` carries the `approvalId` and the `toolCall`
+  // it is about; a `tool-approval-response` from the policy has `approved` and `reason`. A call waiting
+  // for a human has a request and no response, and no result. Other calls just log how many parts there were.
+  const parts = r.steps.flatMap((s) => s.content.filter((p) => p.type.startsWith('tool-')));
+  if (showParts) dump('tool and approval parts from every step', parts);
+  else console.log('  tool and approval parts in steps:', parts.length);
+  dump('finishReason', r.finishReason);
+  // On a resume (the last message is our tool-approval-response), the approved tool runs BEFORE the
+  // first model step, so it is in no step. Its output is in `initialResponseMessages` (a `tool` message
+  // with the tool-result). The AI SDK exposes that field at runtime; TypeScript's GenerateTextResult
+  // type does not, so we read it through a small cast. The rest of the result is in lesson 01, post 00.
+  if (messages.at(-1)?.role === 'tool') {
+    dump('initialResponseMessages', (r as typeof r & { initialResponseMessages: typeof r.responseMessages }).initialResponseMessages);
+  }
   console.log('  model said:', stripThinking(r.text).slice(0, 120) || '(nothing yet — waiting for approval)');
   return r;
 }
@@ -75,13 +90,14 @@ section('[A1] Own patient → approved; other patient → denied');
 await ask(
   scriptedModel({ toolName: 'readRecord', input: { patientId: 'P-001' } }, { toolName: 'readRecord', input: { patientId: 'P-002' } }, { text: 'P-001 has hypertension. I cannot open P-002.' }),
   [{ role: 'user', content: 'Show P-001 and P-002' }],
+  true,
 );
 
 section('[A2] Cancel → the loop STOPS and waits for a human');
 ran.length = 0;
 const model = scriptedModel({ toolName: 'cancelAppointment', input: { appointmentId: 'APT-7' } }, { text: 'APT-7 is cancelled.' });
 const history: ModelMessage[] = [{ role: 'user', content: 'Cancel appointment APT-7' }];
-const first = await ask(model, history);
+const first = await ask(model, history, true);
 console.log('  executed so far:', ran.length ? ran : 'nothing — no cancellation yet ✅');
 
 section('[A3] The human approves → resume with their answer');
@@ -90,6 +106,9 @@ history.push(...first.response.messages, {
   role: 'tool',
   content: [{ type: 'tool-approval-response', approvalId: pending.approvalId, approved: true }],
 });
+// The whole history we send back. Notice the last message: the human's answer is just a `tool`
+// message with a tool-approval-response for the same approvalId. That is the entire "resume" protocol.
+dump('history sent to resume', history);
 await ask(model, history);
 console.log('  executed:', ran); // the approved call ran first, then the model answered
 

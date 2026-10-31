@@ -91,6 +91,20 @@ A failure is recorded with a short reason, and the loop moves to the next model.
 
 One error that explains every attempt. Your API turns it into a `503` with a "try again shortly" message.
 
+```ts
+  dump('withFallback() error', e);
+```
+
+`dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) prints it as fields: `name: 'AggregateError'`, the `message` with every model and its reason, and `errors: []`. The list is empty because we pass `[]`: the reasons were already turned into strings in `skipped`. Pass the caught errors instead if you need their `statusCode`s.
+
+### Look at what came back
+
+```ts
+  if (i === 1) dump('withFallback() result, call 1', r);
+```
+
+`dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) prints the first result of part A in full, once: it is our own helper's shape, and the next calls look the same, so the example only logs them in one line. The whole result is three fields: `text` (the answer), `servedBy` (which model gave it) and `skipped` (one `"<model>: <why>"` string per model that failed before it). An empty `skipped` means the primary answered. A non-empty one is a problem that the user never sees, which is why it belongs in your logs.
+
 ### Step 4 — the real chain
 
 ```ts
@@ -117,6 +131,27 @@ npm run post:06           # A + B (calls your models)
 - **Part A**: calls 1 and 2 are `served by backup` with `primary: …503…` in the skipped list. On call 3, `primary` is skipped with `circuit open`, without any call.
 - **Part B**: on the box (`CHAT_MODEL=qwen3:0.6b`, `FALLBACK_MODEL=qwen2.5:0.5b`), the broken id failed with `Not Found` and `qwen3:0.6b` answered. By call 3 the broken id was skipped instantly because its circuit was open.
 - **B2**: with a 1 ms budget every model times out, and you get one `all models failed → …` message.
+
+Part B with `CHAT_MODEL=qwen3:0.6b` and `FALLBACK_MODEL=qwen2.5:0.5b`, trimmed with "…":
+
+```
+── [B] Real chain: broken id → CHAT_MODEL → FALLBACK_MODEL ──
+call 1: served by qwen3:0.6b; skipped: ["model-that-does-not-exist: Not Found"]; text: "OK."
+call 2: …
+call 3: served by qwen3:0.6b; skipped: ["model-that-does-not-exist: circuit open for model-that-does-not-exist"]; text: "OK."
+
+── [B2] Every model gets a 1 ms budget → one clear error ──
+all models failed → model-that-does-not-exist: circuit open for model-that-does-not-exist | qwen3:0.6b: timeout after 1 ms | qwen2.5:0.5b: timeout after 1 ms
+▼ withFallback() error
+AggregateError {
+  name: 'AggregateError',
+  message: 'all models failed → model-that-does-not-exist: circuit open for model-that-does-not-exist | qwen3:0.6b: timeout after 1 ms | qwen2.5:0.5b: timeout after 1 ms',
+  errors: []
+}
+  (hidden for readability: stack — set SHOW_RAW=1 to print everything)
+```
+
+`FALLBACK_MODEL` (`qwen2.5:0.5b`) appears only in B2: as long as `CHAT_MODEL` answers, the last model in the chain is never called. In B2 the broken id is still skipped by its open breaker, not by the 1 ms timeout.
 
 ## Common gotchas
 

@@ -42,10 +42,17 @@ Open [`example.ts`](./example.ts). Parts **A** and **B** use fake models from `s
 ```ts
 const flaky = flakyModel(2); // fails on calls 1 and 2, succeeds on call 3
 let t0 = performance.now();
-const { text } = await generateText({ model: flaky.model, prompt: 'Say OK', maxRetries: 2 });
+const retried = await generateText({ model: flaky.model, prompt: 'Say OK', maxRetries: 2 });
 ```
 
 The fake model throws a retryable `503` twice, then answers. Your code sees only the answer. The timing in the output shows the backoff waits.
+
+```ts
+const perf = retried.steps[0]!.performance;
+console.log(`finishReason: ${retried.finishReason}  steps: ${retried.steps.length}  responseTimeMs: ${Math.round(perf.responseTimeMs)}  outputTokensPerSecond: ${perf.effectiveOutputTokensPerSecond.toFixed(2)}`);
+```
+
+We don't print the full result again (all its fields are in [lesson 01, post 00](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned)). Look for the two failures in what we do log: they are not there. One step, `finishReason: 'stop'`. The only hint is the step's `performance.responseTimeMs`, about 6000 ms for a model that answers instantly: it includes the backoff waits.
 
 ### Step 2 — turning retries off
 
@@ -53,7 +60,11 @@ The fake model throws a retryable `503` twice, then answers. Your code sees only
   await generateText({ model: flaky2.model, prompt: 'Say OK', maxRetries: 0 });
 ```
 
-With `maxRetries: 0` the first `503` reaches your `catch`. You'll want this when **you** handle failure yourself, for example by switching to another model ([post 06](../06-fallback-chain/README.md)) rather than waiting 6 s on a model that is down.
+```ts
+  dump('caught error (maxRetries: 0)', e);
+```
+
+With `maxRetries: 0` the first `503` reaches your `catch`. The dump shows the error as fields: an `APICallError` with `statusCode: 503` and `isRetryable: true` (the SDK's own retry loop reads exactly this flag), plus the `url` it called. `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) hides the stack trace and the request body it sent (`requestBodyValues`). You'll want this when **you** handle failure yourself, for example by switching to another model ([post 06](../06-fallback-chain/README.md)) rather than waiting 6 s on a model that is down.
 
 ### Step 3 — a timeout that cancels
 
@@ -75,6 +86,12 @@ The fake model would take 3 s. After 300 ms the signal fires, the call rejects, 
 
 Check `e.name === 'TimeoutError'` to tell a timeout apart from other failures, for example to return `504` instead of `500` from your API.
 
+```ts
+  dump('caught error (timeout)', e);
+```
+
+Compare it with the 503 above: a `DOMException` with only `name` and `message`. No `statusCode`, no `isRetryable`, because no server ever answered.
+
 ### Step 4 — the real model
 
 ```ts
@@ -87,6 +104,12 @@ Check `e.name === 'TimeoutError'` to tell a timeout apart from other failures, f
 ```
 
 Part C calls this with 1 ms (always too short) and 120 s (plenty for a small local model).
+
+```ts
+    console.log(`  outputTokens: ${r.usage.outputTokens}  responseTimeMs: ${Math.round(r.steps.at(-1)!.performance.responseTimeMs)}`);
+```
+
+For the call that made it, look at `usage.outputTokens` next to the step's `performance.responseTimeMs`: on a real model the time grows with the tokens it writes, so a time budget and `maxOutputTokens` belong together.
 
 ---
 
@@ -106,6 +129,40 @@ npm run post:04           # A + B + C (calls your CHAT_MODEL)
 - **A2**: `caught after 1 call: …503…`.
 - **B**: `TimeoutError after ~300 ms`.
 - **C**: `budget 1 ms → TimeoutError`, then `budget 120000 ms → answered in …ms`. On the box's small model the answer took well under a second, and the model added made-up visiting hours. A timeout says nothing about correctness.
+
+With `qwen3:0.6b` (timings and the answer differ between runs):
+
+```
+── [A1] maxRetries: 2 (the default) — the SDK hides two 503s from you ──
+finishReason: stop  steps: 1  responseTimeMs: 6007  outputTokensPerSecond: 1.33
+answer "OK" after 3 calls in 6027 ms (backoff waits ~2 s, then ~4 s)
+
+── [A2] maxRetries: 0 — the first 503 reaches your code ──
+caught after 1 call: HTTP 503 overloaded
+▼ caught error (maxRetries: 0)
+APICallError {
+  name: 'AI_APICallError',
+  message: 'HTTP 503 overloaded',
+  url: 'http://mock/api/chat',
+  requestBodyValues: [hidden requestBodyValues: 0 keys],
+  statusCode: 503,
+  isRetryable: true
+}
+  (hidden for readability: requestBodyValues, stack — set SHOW_RAW=1 to print everything)
+
+── [B] A 3 s model with a 300 ms budget ──
+TimeoutError after 302 ms — the HTTP call was cancelled
+▼ caught error (timeout)
+DOMException { name: 'TimeoutError', message: 'The operation was aborted due to timeout' }
+  (hidden for readability: stack — set SHOW_RAW=1 to print everything)
+
+── [C] Your CHAT_MODEL with a 1 ms budget, then a 120 s budget ──
+budget 1 ms → TimeoutError after 14 ms
+budget 120000 ms → answered in 629 ms: Hospital visiting hours are typically scheduled in the morning and evening, with specific times depe
+  outputTokens: 23  responseTimeMs: 628
+```
+
+`outputTokensPerSecond: 1.33` in A1 is the retry cost in one number: a model that answers instantly looks slow, because the step's time includes the 6 s of backoff. In C, `outputTokens: 23` in about 0.6 s is the real speed of a small local model. (In this run the answer happened to have no made-up hours.) The mock's `requestBodyValues` is empty (`0 keys`); a real provider's would hold the whole request.
 
 ## Common gotchas
 

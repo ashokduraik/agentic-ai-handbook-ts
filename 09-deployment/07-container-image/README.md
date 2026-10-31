@@ -65,7 +65,14 @@ The runtime stage copies lesson 04's whole folder: its `pipeline/` library and t
 
 ### Step 3 — checking it
 
-[`example.ts`](./example.ts) checks the Dockerfile against the list above, one small test per practice:
+[`example.ts`](./example.ts) first dumps the Dockerfile lines it will test (comments and blank lines removed). `dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)).
+
+```ts
+// The Dockerfile lines the checks below read. Notice the two FROM lines (two stages) and the USER line.
+dump('Dockerfile instructions', instructions);
+```
+
+Then it checks them against the list above, one small test per practice:
 
 ```ts
   ['runs as a non-root user', instructions.some((l) => /^USER (?!root)/.test(l))],
@@ -96,6 +103,22 @@ docker run --rm -p 8080:8080 --env-file .env -e OLLAMA_BASE_URL=http://host.dock
 ### What you should see
 
 ```
+▼ Dockerfile instructions
+[
+  'FROM node:26.12.1-trixie-slim AS deps',
+  'WORKDIR /app',
+  'COPY package.json package-lock.json ./',
+  …
+  'RUN npm ci --omit=dev --workspace 09-deployment --ignore-scripts --no-audit --no-fund',
+  'FROM node:26.12.1-trixie-slim',
+  'ENV NODE_ENV=production PORT=8080 RAG_DB_PATH=/tmp/rag/rag.db',
+  …
+  'USER node',
+  'EXPOSE 8080',
+  'CMD ["node", "09-deployment/06-the-rag-service/server.ts"]'
+]
+
+── [A] Dockerfile checks ──
 ✅ multi-stage: a deps stage and a runtime stage
 ✅ base image pinned to an exact version (not :latest)
 ✅ npm ci (exact lockfile), production deps only
@@ -105,6 +128,8 @@ docker run --rm -p 8080:8080 --env-file .env -e OLLAMA_BASE_URL=http://host.dock
 ✅ writable data only in /tmp (read-only root filesystem works)
 ✅ .env, node_modules and data are kept out of the image
 ```
+
+Each check is a test on these lines: two `FROM` lines make it multi-stage, `COPY package.json package-lock.json` comes before `COPY shared` (layer caching), `USER node` means non-root, and `CMD [` is the exec form.
 
 **Not tested by the course author:** `docker build` and `docker run` (no Docker on the test machine). CI's `image` job builds this Dockerfile on every push.
 

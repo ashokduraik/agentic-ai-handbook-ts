@@ -100,6 +100,29 @@ Health and readiness are answered *before* the limiter, so a busy pod still answ
   assert.equal((await ask('a slow question')).status, 504, 'timeout → 504');
 ```
 
+### Step 6 — look at the responses
+
+The smoke test dumps one `/ask` response, `status` and `json` only, because this is the first time you see the service's `AskResult` body. The live run just prints `status` and `json` for `/readyz` and `/ask`. The full HTTP response shape (headers and all) is in [post 01](../01-validate-at-the-edge/README.md#step-4--look-at-the-full-response). `dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)).
+
+```ts
+  // The service's response body, dumped once: the first time you see the AskResult JSON. Only `status` and
+  // `json`: the full HTTP response shape (headers and all) is in lesson 09, post 01.
+  dump('POST /ask: status and json', { status: ok.status, json: await ok.clone().json() });
+```
+
+```ts
+  // /readyz: 200 with { ready, reason } when the models are pulled, 503 otherwise. Just status and json.
+  console.log('readyz:', ready.status, await ready.json());
+```
+
+```ts
+  // /ask: the JSON is the AskResult: answer, citations, answerable, citationsValid. (Dumped once in the
+  // smoke test; the full HTTP response shape is in lesson 09, post 01.)
+  console.log('ask:', r.status, await r.json());
+```
+
+`server.ts` and `app.ts` themselves don't dump the `retrieve()` or `generateText()` results. This is the production server: dumping every result would write patients' questions and the hospital documents into your logs on every request (lesson 07 covers what belongs in logs). The one JSON log line per request stays the server's only output. To see those full results, run lesson 04's examples, which dump both.
+
 ---
 
 ## Run it
@@ -123,6 +146,16 @@ Offline:
 ```
 {"level":"info","method":"POST","path":"/ask","status":400,"ms":2,"inFlight":1}
 {"level":"info","method":"POST","path":"/ask","status":200,"ms":101,"inFlight":1,"answerable":true,"citationsValid":true}
+▼ POST /ask: status and json
+{
+  status: 200,
+  json: {
+    answer: 'echo: How much is the deposit? [1]',
+    citations: [ 1 ],
+    answerable: true,
+    citationsValid: true
+  }
+}
 {"level":"info","method":"POST","path":"/ask","status":429,"ms":0,"inFlight":1}
 {"level":"info","method":"POST","path":"/ask","status":200,"ms":100,"inFlight":1,"answerable":true,"citationsValid":true}
 {"level":"info","method":"POST","path":"/ask","status":504,"ms":301,"inFlight":1,"error":"The operation was aborted due to timeout"}
@@ -131,7 +164,25 @@ Offline:
 
 Node also prints an `ExperimentalWarning` about SQLite (lesson 04's index uses `node:sqlite`). It's harmless. Millisecond values vary a little from run to run.
 
-Live on the box (`qwen3:0.6b`, `qwen3-embedding:0.6b`): `/readyz` → `both models pulled`; the deposit question → **200** in 2.5 s with `{ answer: '100', citations: [1], answerable: true, citationsValid: true }`, which is correct (SAR 100) but terse. Through `npm start` and curl, "Can I bring food for a patient?" (not in the documents) came back `answerable: false`, though the text still began "No, you cannot…": a small model claiming more than it knows. `SIGTERM` printed `draining`, then `drained, exiting`.
+The `json` is exactly an `AskResult`. The fake pipeline echoes the question; the real one fills the same four fields.
+
+Live (`qwen3.8:latest`, `qwen3-embedding:4b`, first run, so the index was empty and got ingested):
+
+```
+{"level":"info","msg":"index empty, ingesting docs"}
+readyz: 200 { ready: true, reason: 'both models pulled' }
+{"level":"info","method":"POST","path":"/ask","status":200,"ms":16215,"inFlight":1,"answerable":true,"citationsValid":true}
+ask: 200 {
+  answer: 'SAR 100',
+  citations: [ 1 ],
+  answerable: true,
+  citationsValid: true
+}
+```
+
+The answer changes between runs. In this run the amount is right (SAR 100), though terse. `citationsValid: true` only means the citation numbers exist; it can't catch a wrong claim (post 09 and lesson 05 do). `ms` was 16215 this time, which includes the first-run ingest warm-up.
+
+In an earlier run, on `qwen3:0.6b` and `qwen3-embedding:0.6b`, the answer was `A SAR 100 deposit is required for each new booking.`: the amount was right, but "for each new booking" is wrong, because the deposit applies after three no-shows. In another earlier run: `/readyz` → `both models pulled`; the deposit question → **200** in 2.5 s with `{ answer: '100', citations: [1], answerable: true, citationsValid: true }`, which is correct (SAR 100) but terse. Through `npm start` and curl, "Can I bring food for a patient?" (not in the documents) came back `answerable: false`, though the text still began "No, you cannot…": a small model claiming more than it knows. `SIGTERM` printed `draining`, then `drained, exiting`.
 
 With `REQUEST_TIMEOUT_MS=500`, the answer was a **504 after 1573 ms**, not 500 ms: retrieval (embedding + reranking) doesn't take the signal, so the timeout only bit at the model call.
 

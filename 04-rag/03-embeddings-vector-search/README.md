@@ -53,17 +53,30 @@ Open [`example.ts`](./example.ts).
 
 ```ts
 const texts = chunks.map((c) => `${c.heading}\n${c.text}`);
-const chunkVectors = offline ? texts.map(fakeEmbed) : (await embedMany({ model: embeddingModel(), values: texts })).embeddings;
+const many = offline ? { embeddings: texts.map(fakeEmbed) } : await embedMany({ model: embeddingModel(), values: texts });
+console.log('embedMany: embeddings.length =', many.embeddings.length, '| usage.tokens =', 'usage' in many ? many.usage.tokens : 'n/a (offline)');
+const chunkVectors = many.embeddings;
 ```
 
 `chunkMarkdown` from post 02 gives 15 chunks. `embedMany` embeds them in one batched call; `embeddingModel()` comes from your `.env` (`EMBED_MODEL`). With `--offline`, a fake "embedding" (one number per hand-picked word) stands in so you can run the mechanics without a model.
+
+We saw the full `embedMany()` result in [lesson 01 post 06](../../01-foundations-structured-output/06-embeddings/README.md), so the `console.log` above logs only the two fields this post needs:
+
+- `embeddings`: one vector per value, **in the same order**: `embeddings[i]` belongs to `values[i]` (and so to `chunks[i]`). That is why `chunkVectors[i]` lines up with `chunks[i]` later.
+- `usage.tokens`: tokens the embedding model read: your ingest cost.
+
+Offline, `many` is only `{ embeddings }`, with 8-number fake vectors, so there is no `usage`.
 
 ### Step 2 — embed the question
 
 ```ts
 // 2. Embed the question with the SAME model (vectors from different models are not comparable).
-const queryVector = offline ? fakeEmbed(question) : (await embed({ model: embeddingModel(), value: question })).embedding;
+const one = offline ? { embedding: fakeEmbed(question) } : await embed({ model: embeddingModel(), value: question });
+console.log('embed: usage.tokens =', 'usage' in one ? one.usage.tokens : 'n/a (offline)');
+const queryVector = one.embedding;
 ```
+
+`embed` is the single-value version (full result: [lesson 01 post 06](../../01-foundations-structured-output/06-embeddings/README.md)): one `embedding` (the same 1024 numbers long as every chunk vector, which is what makes them comparable) and `usage`.
 
 ### Step 3 — score and sort
 
@@ -74,6 +87,14 @@ const ranked = chunks
 ```
 
 `cosineSimilarity` comes from the AI SDK. This is a "brute-force" search: compare with every chunk. Perfectly fine for thousands of chunks.
+
+This is the one value we print in full with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)), because it is the first vector-search hit list you meet:
+
+```ts
+dump('top 3 hits', ranked.slice(0, 3));
+```
+
+Each hit is just `{ heading, score }` with the full, unrounded cosine score.
 
 ---
 
@@ -105,6 +126,24 @@ With `qwen3-embedding:0.6b`:
 Read this carefully. Vector search found the right **document**: all three visiting-hours sections beat everything else. But the top hit is **Pediatric ward** ("child"), not the **ICU** rule we need. Embeddings capture "this is about kids visiting", not "the rule about kids in the ICU". That near-miss is exactly what post 05 (hybrid) and post 06 (reranking) fix.
 
 Notice also the scores: the best is ~0.6 and the worst ~0.27. Real embedding scores are compressed; only the **order** matters.
+
+Before the ranking, the run also logs the targeted usage fields, and after it the one dump (a real run, trimmed at `…`; the numbers depend on your embedding model):
+
+```
+embedMany: embeddings.length = 15 | usage.tokens = 756
+embed: usage.tokens = 11
+…
+▼ top 3 hits
+[
+  {
+    heading: 'Visiting Hours Policy (Al Noor General Hospital — fictional) › Pediatric ward',
+    score: 0.5969682438854131
+  },
+  …
+]
+```
+
+Embedding the whole corpus took **756 tokens**, the question **11**. That's the economics of RAG: pay for the documents once, then a few tokens per question.
 
 ## Common gotchas
 

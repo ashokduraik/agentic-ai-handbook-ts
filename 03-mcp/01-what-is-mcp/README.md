@@ -112,7 +112,8 @@ await client.connect(clientSide); // sends "initialize", then "notifications/ini
 ```
 
 ```ts
-const { tools } = await client.listTools();
+const listed = await client.listTools();
+const { tools } = listed;
 ```
 
 ```ts
@@ -120,6 +121,26 @@ const result = await client.callTool({ name: 'get_opening_hours', arguments: { d
 ```
 
 Three lines of client code; each maps to one JSON-RPC method you'll see printed.
+
+### Step 4 — look at what each call returned
+
+The JSON-RPC lines show the wire. After each call the file also prints the **returned value** with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)):
+
+```ts
+dump('client.getServerCapabilities()', client.getServerCapabilities());
+```
+
+```ts
+dump('client.listTools() result', listed);
+```
+
+```ts
+dump('client.callTool() result', result);
+```
+
+- **`getServerCapabilities()`**: what the server announced in the handshake. Here `{ tools: { listChanged: true } }`: it has tools, and it may tell the client when that list changes. No `resources` or `prompts`, so a client won't ask for them.
+- **`listTools()`**: `{ tools: [...] }`. Each tool has a `name`, a `description` and an `inputSchema`, which is **JSON Schema** generated from the Zod shape (the `z.enum` became `enum: ['cardiology', 'radiology', 'pharmacy']` and `required: ['department']`). That schema is exactly what a model is shown. `execution.taskSupport` is a newer protocol field: whether the tool can run as a long background "task" (`'forbidden'` = no; ignore it for now).
+- **`callTool()`**: `{ content: [...] }`, a **list of typed parts** (here one `{ type: 'text', text }`). There is no plain string, which is why the example reads `content[0].text`. Post 02 adds `structuredContent` and `isError`.
 
 ---
 
@@ -148,6 +169,36 @@ result text: radiology: every day 07:00-22:00
 ```
 
 Look at `capabilities`: the server announces it has `tools`. A client only asks for what was announced.
+
+Between those lines come the three dumps (a real run; no model, so yours will match):
+
+```
+server says it is: { name: 'clinic-hours', version: '1.0.0' }
+▼ client.getServerCapabilities()
+{ tools: { listChanged: true } }
+…
+tools: [ 'get_opening_hours' ]
+▼ client.listTools() result
+{
+  tools: [
+    {
+      name: 'get_opening_hours',
+      description: 'Opening hours of a hospital department.',
+      inputSchema: {
+        type: 'object',
+        properties: { department: { type: 'string', enum: [ 'cardiology', 'radiology', 'pharmacy' ] } },
+        required: [ 'department' ],
+        '$schema': 'http://json-schema.org/draft-07/schema#'
+      },
+      execution: { taskSupport: 'forbidden' }
+    }
+  ]
+}
+…
+result text: radiology: every day 07:00-22:00
+▼ client.callTool() result
+{ content: [ { type: 'text', text: 'radiology: every day 07:00-22:00' } ] }
+```
 
 ## Common gotchas
 

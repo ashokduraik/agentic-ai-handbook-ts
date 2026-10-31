@@ -11,7 +11,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { embed } from 'ai';
-import { embeddingModel, section } from '@learn/shared';
+import { dump, embeddingModel, section } from '@learn/shared';
 import { DB_PATH, DOCS_DIR, chunkMarkdown, ingestDir, openStore } from '../pipeline/rag.ts';
 import { fakeEmbed } from '../pipeline/offline-fakes.ts';
 
@@ -38,7 +38,11 @@ console.log(row);
 // 3. QUERY (every request): embed only the question, then ask the store.
 section(`3. vectorSearch("${question}")`);
 const queryVector = offline ? fakeEmbed(question) : (await embed({ model: embeddingModel(), value: question })).embedding;
-store.vectorSearch(queryVector, 3).forEach((h, i) => console.log(`  ${i + 1}. ${h.score.toFixed(3)}  ${h.heading}  [${h.id}]`));
+const hits = store.vectorSearch(queryVector, 3);
+hits.forEach((h, i) => console.log(`  ${i + 1}. ${h.score.toFixed(3)}  ${h.heading}  [${h.id}]`));
+// The full vectorSearch() result: Hit[] = every Chunk field read back from SQLite, plus `score`
+// (cosine). Notice there is no embedding in a hit: the store keeps the vectors to itself.
+dump('store.vectorSearch() result', hits);
 
 // 4. It persists: a brand-new store object on the same file sees the same chunks (no re-embedding).
 if (!offline) {

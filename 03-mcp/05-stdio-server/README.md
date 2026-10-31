@@ -108,6 +108,21 @@ await client.connect(new StdioClientTransport(serverProcess)); // starts `node -
 const booked = await client.callTool({ name: 'book_appointment', arguments: { patientId: 'P-001', slotId: 'S-1', reason: 'chest pain follow-up' } });
 ```
 
+We already saw the full replies of `listTools`, `callTool`, `readResource` and `getPrompt` in earlier posts ([lesson 03 post 01](../01-what-is-mcp/README.md), [post 02](../02-tools/README.md), [post 03](../03-resources/README.md) and [post 04](../04-prompts/README.md)), and they have exactly the same shapes over stdio: the transport changed, the protocol didn't. So the file prints only the fields that matter here. The one full `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) is the handshake result, because it is genuinely different from post 01:
+
+```ts
+dump('client.getServerCapabilities()', client.getServerCapabilities());
+```
+
+The **capabilities** now list `prompts`, `resources` **and** `tools`, because this server registers all three. For a tool definition we log just two facts:
+
+```ts
+const searchSlots = tools.find((t) => t.name === 'search_slots');
+console.log('search_slots inputSchema.required:', JSON.stringify(searchSlots?.inputSchema.required), '| has outputSchema:', !!searchSlots?.outputSchema);
+```
+
+The `inputSchema` and `outputSchema` (both JSON Schema) survive the trip across the pipe, so a host can read them without importing your code. The `callTool`, `readResource` and `getPrompt` calls log only the fields shown under "What you should see" below (`structuredContent`, `content`, `isError`).
+
 ```ts
 await client.close(); // also stops the server child process
 ```
@@ -139,7 +154,23 @@ res   patient://P-001/appointments
 res   patient://P-002/appointments
 tmpl  patient://{patientId}/appointments
 prompt confirmation-sms
+```
 
+Then the one full dump of the handshake (a real run, no model) and the targeted tool-definition log:
+
+```
+▼ client.getServerCapabilities()
+{
+  prompts: { listChanged: true },
+  resources: { listChanged: true },
+  tools: { listChanged: true }
+}
+search_slots inputSchema.required: ["department"] | has outputSchema: true
+```
+
+And the calls in the other process (the later "Bad arguments" and "Resources & prompts" parts print only `isError`, the resource text and the prompt content):
+
+```
 ── Call tools in another process ──
 structuredContent: {"slots":[{"id":"S-1",...},{"id":"S-2",...}]}
 [mcp-server] booked A-101

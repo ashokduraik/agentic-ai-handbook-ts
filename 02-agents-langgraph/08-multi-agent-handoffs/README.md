@@ -133,6 +133,16 @@ console.log('route  :', final.handoffs.join('  |  '));
 
 The step limit from post 05: if agents ever kept handing work back and forth, this stops them.
 
+```ts
+console.log('route  :', final.handoffs.join('  |  '));
+final.answers.forEach((a) => console.log(a));
+// We do not dump the whole final state: post 02 showed a full invoke() state. The two lines above print
+// the fields that matter here. Notice: `handoffs` and `answers` grew one entry per agent (their
+// reducers append), so `route` is the exact path; `request` is unchanged, nobody returned a new value for it.
+```
+
+We saw the full `graph.invoke()` final state in [post 02](../02-state-graphs/README.md#step-4--run-it), so the file only prints the two fields that matter here (`final.handoffs` as the `route`, and each of `final.answers`). `request` is exactly what you passed in: no agent returned a new value for it. `handoffs` and `answers` have one entry per agent that ran, in order, because their reducers **append**. `Command({ update })` goes through the same reducers as a normal node's return value. So the state is the audit record: who handled the request, and what each one said.
+
 ---
 
 ## Run it
@@ -159,6 +169,8 @@ route  : supervisor → billing_agent  |  billing_agent → clinical_agent  |  c
 [billing] Your invoice INV-2207 is ready …
 [clinical] Do not double the dose. Take the next tablet at the usual time and confirm with your doctor.
 ```
+
+The `route` line is `final.handoffs` joined together, and the answer lines are `final.answers`: that is the whole audit trail.
 
 Live, with a good model, the route is the same and the answers are the model's own words.
 

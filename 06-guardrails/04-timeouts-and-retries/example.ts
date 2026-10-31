@@ -11,7 +11,7 @@
  *       npx tsx 04-timeouts-and-retries/example.ts --offline  (A + B)
  */
 import { generateText } from 'ai';
-import { chatModel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, section, stripThinking } from '@learn/shared';
 import { flakyModel, slowModel } from '../support/mock-models.ts';
 
 // ---------------------------------------------------------------------------
@@ -20,7 +20,13 @@ import { flakyModel, slowModel } from '../support/mock-models.ts';
 section('[A1] maxRetries: 2 (the default) — the SDK hides two 503s from you');
 const flaky = flakyModel(2); // fails on calls 1 and 2, succeeds on call 3
 let t0 = performance.now();
-const { text } = await generateText({ model: flaky.model, prompt: 'Say OK', maxRetries: 2 });
+const retried = await generateText({ model: flaky.model, prompt: 'Say OK', maxRetries: 2 });
+// The result (all fields: lesson 01, post 00) has no record of the two hidden failures: one step,
+// finishReason 'stop'. The only hint is the step's `performance.responseTimeMs` (it includes the
+// backoff waits). If you need to know about retries, count them yourself (flaky.calls).
+const { text } = retried;
+const perf = retried.steps[0]!.performance;
+console.log(`finishReason: ${retried.finishReason}  steps: ${retried.steps.length}  responseTimeMs: ${Math.round(perf.responseTimeMs)}  outputTokensPerSecond: ${perf.effectiveOutputTokensPerSecond.toFixed(2)}`);
 console.log(`answer "${text}" after ${flaky.calls.count} calls in ${Math.round(performance.now() - t0)} ms (backoff waits ~2 s, then ~4 s)`);
 
 section('[A2] maxRetries: 0 — the first 503 reaches your code');
@@ -29,6 +35,9 @@ try {
   await generateText({ model: flaky2.model, prompt: 'Say OK', maxRetries: 0 });
 } catch (e) {
   console.log(`caught after ${flaky2.calls.count} call: ${(e as Error).message}`);
+  // The error your code receives. Notice `statusCode: 503` and `isRetryable: true`: the SDK's
+  // own retry logic reads exactly these fields.
+  dump('caught error (maxRetries: 0)', e);
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +55,8 @@ try {
 } catch (e) {
   // AbortSignal.timeout() rejects with a DOMException named "TimeoutError".
   console.log(`${(e as Error).name} after ${Math.round(performance.now() - t0)} ms — the HTTP call was cancelled`);
+  // A timeout is not an API error: no statusCode, no isRetryable. Just a DOMException named TimeoutError.
+  dump('caught error (timeout)', e);
 }
 
 if (process.argv.includes('--offline')) process.exit(0);
@@ -63,6 +74,9 @@ async function askWithBudget(ms: number) {
       maxOutputTokens: 512,
     });
     console.log(`budget ${ms} ms → answered in ${Math.round(performance.now() - t0)} ms: ${stripThinking(r.text).slice(0, 100)}`);
+    // The result that made it inside the budget (all fields: lesson 01, post 00). Notice `usage.outputTokens`:
+    // on a real model the time you need grows with the tokens it writes, so budgets and maxOutputTokens go together.
+    console.log(`  outputTokens: ${r.usage.outputTokens}  responseTimeMs: ${Math.round(r.steps.at(-1)!.performance.responseTimeMs)}`);
   } catch (e) {
     console.log(`budget ${ms} ms → ${(e as Error).name} after ${Math.round(performance.now() - t0)} ms`);
   }

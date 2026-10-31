@@ -12,7 +12,7 @@
  */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { isMain, section } from '@learn/shared';
+import { dump, isMain, section } from '@learn/shared';
 
 export function installGracefulShutdown(server: Server, { onDraining = () => {}, hardStopMs = 25_000 } = {}) {
   const shutdown = (signal: string) => {
@@ -47,14 +47,22 @@ if (isMain(import.meta.url)) {
   const at = () => `${String(Math.round(performance.now() - t0)).padStart(5)} ms`;
 
   section('[B] SIGTERM while a request is in flight');
-  const inFlight = fetch(`${base}/ask`, { method: 'POST' }).then(async (r) => console.log(`${at()}  in-flight request → ${r.status} "${await r.text()}"`));
+  const inFlight = fetch(`${base}/ask`, { method: 'POST' }).then(async (r) => {
+    // Notice status 200 and the whole text: draining let the request finish instead of cutting the
+    // connection. Just those two fields: the full HTTP response shape is in lesson 09, post 01.
+    console.log(`${at()}  in-flight request → ${r.status} "${await r.text()}"`);
+  });
   await new Promise((r) => setTimeout(r, 200));
   console.log(`${at()}  sending SIGTERM (what Kubernetes does on a rolling update)`);
   process.kill(process.pid, 'SIGTERM');
   await new Promise((r) => setTimeout(r, 50));
   await fetch(`${base}/ask`, { method: 'POST' }).then(
     (r) => console.log(`${at()}  new request → ${r.status}`),
-    (e) => console.log(`${at()}  new request → refused (${(e as Error).cause ? ((e as Error).cause as Error).message : (e as Error).message})`),
+    (e) => {
+      console.log(`${at()}  new request → refused (${(e as Error).cause ? ((e as Error).cause as Error).message : (e as Error).message})`);
+      // The error fetch threw. Notice the useful part is in `cause`: code ECONNREFUSED, nobody listening.
+      dump('new request: fetch error', e);
+    },
   );
   await inFlight;
 }

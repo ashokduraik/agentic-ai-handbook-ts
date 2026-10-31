@@ -72,8 +72,12 @@ The approved wording, including the "No medical advice" rule, is in one place.
 ### Step 2 — the client lists and fills it
 
 ```ts
-const { prompts } = await client.listPrompts();
+const listedPrompts = await client.listPrompts();
+const { prompts } = listedPrompts;
+dump('client.listPrompts() result', listedPrompts);
 ```
+
+The full `prompts/list` result, printed with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)). Each prompt has `name`, `title`, `description` and `arguments`: a list of `{ name, required }` built from your Zod `argsSchema`. That list is the "form" a host UI shows before it fills the prompt.
 
 ```ts
 const filled = await client.getPrompt({
@@ -84,6 +88,12 @@ const filled = await client.getPrompt({
 
 No model yet: `filled.messages` is plain data.
 
+```ts
+dump('client.getPrompt() result', filled);
+```
+
+The whole `prompts/get` result is just `{ messages: [...] }`, with the arguments already filled in. Each message is `{ role, content: { type: 'text', text } }`: note that `content` is **one** typed part here, not a list as in tool results.
+
 ### Step 3 — the host sends it to its own model
 
 ```ts
@@ -92,10 +102,12 @@ const messages: ModelMessage[] = filled.messages.map((m) => ({
   role: m.role,
   content: m.content.type === 'text' ? m.content.text : '',
 }));
-const { text } = await generateText({ model: chatModel(), messages, maxOutputTokens: 400 });
+const result = await generateText({ model: chatModel(), messages, maxOutputTokens: 400 });
+const { text } = result;
+console.log('finishReason:', result.finishReason, '| usage.inputTokens:', result.usage.inputTokens, '| usage.outputTokens:', result.usage.outputTokens);
 ```
 
-A small adapter from MCP's message shape to the AI SDK's, then a normal `generateText` with the model from your `.env`.
+A small adapter from MCP's message shape to the AI SDK's, then a normal `generateText` with the model from your `.env`. We saw the full `generateText()` result in [lesson 01 post 00](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned), so here we only log the two things this post cares about: `finishReason` (`'stop'`, or `'length'` if the SMS was cut off by `maxOutputTokens`) and `usage.inputTokens`, the cost of the server's prompt text.
 
 ---
 
@@ -125,6 +137,46 @@ prompt confirmation-sms: Draft a short, friendly SMS confirming an appointment  
 ── 2. Send the filled prompt to the model (ollama:…) ──
 SMS (94 chars): Hi Fatima, …
 ```
+
+A real run with the dumps and the targeted log (`qwen3:0.6b`, trimmed at `…`):
+
+```
+── 1. Discover and fill a prompt (no model) ────────────────────
+▼ client.listPrompts() result
+{
+  prompts: [
+    {
+      name: 'confirmation-sms',
+      title: 'Appointment confirmation SMS',
+      description: 'Draft a short, friendly SMS confirming an appointment',
+      arguments: [
+        { name: 'patientName', required: true },
+        { name: 'when', required: true },
+        { name: 'doctor', required: true }
+      ]
+    }
+  ]
+}
+…
+▼ client.getPrompt() result
+{
+  messages: [
+    {
+      role: 'user',
+      content: {
+        type: 'text',
+        text: 'Write a <160 character SMS to Fatima confirming their appointment with Dr. Qureshi at 3 Nov 09:30. No medical advice.'
+      }
+    }
+  ]
+}
+
+── 2. Send the filled prompt to the model (ollama:qwen3:0.6b) ──
+finishReason: stop | usage.inputTokens: 51 | usage.outputTokens: 22
+SMS (60 chars): Your appointment with Dr. Qureshi is confirmed. 3 Nov 09:30.
+```
+
+Your SMS text and token counts will differ (on an earlier run the same model wrote *"Dr. Qureshi, appointment at Nov 3, 9:30. No medical advice."*, copying the instruction into the SMS). `inputTokens` stays at 51 as long as the prompt and model don't change.
 
 On the box, the tiny `qwen3:0.6b` wrote *"Hi Fatima, I'll be at Dr. Qureshi's appointment on 3 November 09:30. No medical advice needed."*: under 160 characters, but in the wrong voice and repeating the instruction. A shared template does not make a small model good; it makes the **instructions** consistent. Measure the output (lesson 05).
 

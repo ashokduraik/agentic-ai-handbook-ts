@@ -94,16 +94,32 @@ Take `2k` from each list (a wider net), add `1/(60 + rank)` per appearance, sort
 ### The comparison
 
 ```ts
-print(store.vectorSearch(queryVector, 3));
+const vector = store.vectorSearch(queryVector, 3);
 ```
 
 ```ts
-print(store.keywordSearch(q, 3));
+const keyword = store.keywordSearch(q, 3);
 ```
 
 ```ts
-print(store.hybridSearch(q, queryVector, 3));
+const hybrid = store.hybridSearch(q, queryVector, 3);
 ```
+
+Then the best hit of each list is printed in full with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)):
+
+```ts
+dump('best hit per search', { vector: vector[0], keyword: keyword[0], hybrid: hybrid[0] });
+```
+
+All three return the same `Hit` shape (`id`, `source`, `heading`, `text`, `score`), but **`score` means something different in each**:
+
+| Search | `score` | Range |
+|---|---|---|
+| `vectorSearch` | cosine similarity | about 0–1 (here 0.3–0.6) |
+| `keywordSearch` | BM25, sign flipped so bigger = better | 0 to unbounded (here up to ~5.6) |
+| `hybridSearch` | RRF: `1/(60 + position)` summed over both lists | tiny: at most 2/61 ≈ 0.0328 |
+
+You could never add 0.6 and 5.6 meaningfully, which is why RRF fuses **positions**, not scores. A hit that is first in both lists gets the maximum 0.0328 (the deposit question). If BM25 finds nothing, `keyword` is `undefined`. (`dump` rounds numbers ≥ 1 to two decimals, so BM25 5.0455 prints as 5.05.)
 
 ---
 
@@ -152,6 +168,56 @@ What to notice:
 
 - **Kid question**: BM25 put the ICU rule first (thanks to "intensive" and "care"); vectors put it second. Hybrid now has ICU in the top 2, tied with Pediatric ward, and pushed the unrelated "Pharmacy pickup" out.
 - **Deposit question**: vectors barely separate the right chunk (0.33 vs 0.30); BM25 finds it with a huge margin and nothing else. Hybrid keeps it clearly first.
+
+The dumps after each question (a real run, trimmed at `…`):
+
+```
+▼ best hit per search
+{
+  vector: {
+    id: 'visiting-hours.md#2',
+    source: 'visiting-hours.md',
+    heading: 'Visiting Hours Policy (Al Noor General Hospital — fictional) › Pediatric ward',
+    text: 'One parent or legal guardian may stay with the child 24 hours a day. Siblings may visit during general visiting hours.',
+    score: 0.5992179426141029
+  },
+  keyword: {
+    id: 'visiting-hours.md#1',
+    …
+    heading: 'Visiting Hours Policy (Al Noor General Hospital — fictional) › Intensive Care Unit (ICU)',
+    …
+    score: 5.05
+  },
+  hybrid: {
+    id: 'visiting-hours.md#2',
+    …
+    score: 0.03252247488101534
+  }
+}
+…
+── "SAR 100 deposit" ───────────────────────────────────────────
+…
+▼ best hit per search
+{
+  vector: {
+    id: 'appointment-cancellation.md#1',
+    …
+    score: 0.33788328920580335
+  },
+  keyword: {
+    id: 'appointment-cancellation.md#1',
+    …
+    score: 5.57
+  },
+  hybrid: {
+    id: 'appointment-cancellation.md#1',
+    …
+    score: 0.03278688524590164
+  }
+}
+```
+
+For the deposit question all three agree on `appointment-cancellation.md#1`, and its RRF score is exactly 1/61 + 1/61 = 0.0328: first in both lists. Vector scores vary a little between runs; BM25 and RRF positions don't.
 
 Hybrid didn't make the kid question perfect; it made the right chunk reliably **present** in the top few. Putting it **first** is the reranker's job (post 06).
 

@@ -13,7 +13,7 @@
  * Run:  npx tsx 04-health-and-readiness/example.ts            (checks your real setup)
  *       npx tsx 04-health-and-readiness/example.ts --offline  (fake Ollama answers)
  */
-import { env, isMain, optional, section } from '@learn/shared';
+import { dump, env, isMain, optional, section } from '@learn/shared';
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -68,6 +68,16 @@ if (isMain(import.meta.url)) {
     if (results.map(([, r]) => r.ready).join() !== 'true,false,false') throw new Error('unexpected readiness results');
   } else {
     section(`[C] Your setup (AI_PROVIDER=${env.provider})`);
-    console.log(' ', await checkReady());
+    // A fetch that also logs what Ollama answered, so you can see what checkReady() inspects. Only `status`
+    // and the model names: the full HTTP response shape is in lesson 09, post 01, and each model entry
+    // carries sizes and digests that checkReady() never reads. Notice `models[].name`: the tags are
+    // compared with CHAT_MODEL and EMBED_MODEL.
+    const loggingFetch: Fetch = async (url, init) => {
+      const r = await fetch(url, init);
+      const json = (await r.clone().json()) as { models: { name: string }[] };
+      dump(`GET ${url}: status and model names`, { status: r.status, models: json.models.map((m) => m.name) });
+      return r;
+    };
+    console.log(' ', await checkReady(loggingFetch));
   }
 }

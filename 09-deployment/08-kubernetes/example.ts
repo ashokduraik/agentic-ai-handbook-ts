@@ -13,7 +13,7 @@
  * Run:  npx tsx 08-kubernetes/example.ts   (no model and no cluster needed)
  */
 import type { AddressInfo } from 'node:net';
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 import { createApp } from '../06-the-rag-service/app.ts';
 
 // Same numbers as k8s/deployment.yaml; one "second" here is 10 ms.
@@ -62,6 +62,13 @@ log('💥 model backend goes down');
 backendUp = false;
 await wait(25);
 log(`liveness failures so far: ${state.fails.liveness}, restarts: ${state.restarts}`);
+// What the two probes see right now, as `status` and `json` only (the full HTTP response shape is in lesson 09,
+// post 01). Notice /healthz still answers 200 (the process is fine) while /readyz answers 503 with the
+// reason: that difference is why the pod is not restarted.
+for (const path of ['/healthz', '/readyz']) {
+  const r = await fetch(base + path);
+  dump(`GET ${path}: status and json`, { status: r.status, json: await r.json() });
+}
 log('🔧 model backend is back');
 backendUp = true;
 await wait(10);

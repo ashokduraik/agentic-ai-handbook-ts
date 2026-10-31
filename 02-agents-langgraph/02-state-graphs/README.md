@@ -136,6 +136,24 @@ final.trail.forEach((line, i) => console.log(`  ${i + 1}. ${line}`));
 
 `invoke()` takes the **starting** state and returns the **final** state after `END`. The trail shows exactly which nodes ran, in which order.
 
+To see the **whole** value `invoke()` returned, not just two fields, the file prints it with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)). It does this only for the **first** note. The second note returns the same shape, so the file prints just its `note` field:
+
+```ts
+if (firstNote) {
+  // The full value invoke() returned: the FINAL STATE, a plain object with every field of the schema.
+  // Notice: `note` is trimmed (intake replaced it), `urgency` was set by classify, and `trail`
+  // has one entry per node because its reducer APPENDS instead of replacing.
+  // We dump it in full only for the FIRST note: the second note returns the same shape.
+  dump('graph.invoke() result (final state)', final);
+  firstNote = false;
+} else {
+  // Same shape as above, so we only print the `note` field of the final state.
+  console.log('final state note =', final.note);
+}
+```
+
+The dump is a plain object with one key per field of the schema: `note` (trimmed, because `intake` returned a new value and a plain field is **replaced**), `urgency` (set by `classify`; it started as the default `'unknown'`) and `trail` (one entry per node, because its reducer **appends**). Nothing else: no history, no node list. The state is all you get back.
+
 ```ts
 console.log((await graph.getGraphAsync()).drawMermaid());
 ```
@@ -157,7 +175,32 @@ npm run post:02
 
 - The chest-pain note: `urgency = urgent`, then a trail of `intake`, `classify: urgent`, `page_on_call`.
 - The knee-pain note: `urgency = routine`, then `intake`, `classify: routine`, `book_clinic`.
+- After the first trail, the full final state from `dump`. After the second trail, only its `note`.
 - A Mermaid diagram where `classify -.-> page_on_call` and `classify -.-> book_clinic` are dashed lines (conditional edges).
+
+A real run (no model, so yours will match, trimmed at `…`):
+
+```
+── Note: "Severe chest pain since 20 minutes, sweating." ───────
+urgency = urgent
+  1. intake: note received
+  2. classify: urgent
+  3. page_on_call: on-call doctor paged
+▼ graph.invoke() result (final state)
+{
+  note: 'Severe chest pain since 20 minutes, sweating.',
+  urgency: 'urgent',
+  trail: [ 'intake: note received', 'classify: urgent', 'page_on_call: on-call doctor paged' ]
+}
+
+── Note: "Needs a repeat prescription for knee pain." ──────────
+urgency = routine
+  1. intake: note received
+  2. classify: routine
+  3. book_clinic: next free clinic slot offered
+final state note = Needs a repeat prescription for knee pain.
+…
+```
 
 ## Common gotchas
 

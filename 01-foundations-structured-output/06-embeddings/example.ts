@@ -10,7 +10,7 @@
  */
 import { cosineSimilarity, embed, embedMany } from 'ai';
 // embeddingModel() reads EMBED_MODEL (and AI_PROVIDER) from .env — an embedding model, not a chat model.
-import { embeddingModel, section } from '@learn/shared';
+import { dump, embeddingModel, section } from '@learn/shared';
 
 // ---------------------------------------------------------------------------
 // Part A: the maths, with 3-number vectors you can check by hand
@@ -37,7 +37,12 @@ const sentences = [
   'My child has a fever and a rash.',
 ];
 // embedMany sends all texts in one go and returns one vector per text, in the same order.
-const { embeddings } = await embedMany({ model: embeddingModel(), values: sentences });
+const many = await embedMany({ model: embeddingModel(), values: sentences });
+const { embeddings } = many;
+// The full embedMany() result. Notice: `values` echoes your inputs, `embeddings` is one vector per
+// input in the same order (dump shortens each to its length + first values), and `usage.tokens`
+// is what the provider counted for the whole batch.
+dump('embedMany() result', many);
 console.log(`Each sentence became a vector of ${embeddings[0]!.length} numbers. First 5 of sentence 1:`, embeddings[0]!.slice(0, 5).map((n) => n.toFixed(3)));
 
 // Similarity of every sentence to every other one (a small table).
@@ -52,10 +57,15 @@ sentences.forEach((s, i) => console.log(`  S${i + 1} = ${s}`));
 // ---------------------------------------------------------------------------
 section('[C] Semantic search: closest sentence to a new question');
 const query = 'Is it normal to feel pressure in the chest on the stairs?';
-const { embedding: q } = await embed({ model: embeddingModel(), value: query });
+const single = await embed({ model: embeddingModel(), value: query });
+const { embedding: q } = single;
+// The full embed() result: the same shape for ONE value — `value`, ONE `embedding`, `usage`.
+dump('embed() result', single);
 const ranked = sentences
   .map((s, i) => ({ s, score: cosineSimilarity(q, embeddings[i]!) }))
   .sort((a, b) => b.score - a.score);
+// The ranked list is the raw "retrieval hits": each document with its similarity score.
+dump('ranked (search hits, best first)', ranked);
 console.log('Question:', query);
 ranked.forEach((r, i) => console.log(`  ${i + 1}. ${r.score.toFixed(2)}  ${r.s}`));
 console.log('Look for: the two chest sentences rank at the top, even though they share few words with the question.');

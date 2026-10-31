@@ -30,7 +30,7 @@ import {
 } from '@opentelemetry/semantic-conventions/incubating'; // GenAI semconv is still "Development" status
 import { ATTR_ERROR_TYPE } from '@opentelemetry/semantic-conventions';
 import { generateText, type LanguageModel } from 'ai';
-import { chatModel, env, optional, section } from '@learn/shared';
+import { chatModel, dump, env, optional, section } from '@learn/shared';
 import { setupTracing } from '../01-traces-and-spans/tracing.ts';
 import { failingModel, scriptedModel } from '../support/mock.ts';
 
@@ -57,6 +57,9 @@ async function tracedChat(model: LanguageModel, modelName: string, prompt: strin
       try {
         if (captureContent) span.setAttribute(ATTR_GEN_AI_INPUT_MESSAGES, JSON.stringify([{ role: 'user', parts: [{ type: 'text', content: prompt }] }]));
         const r = await generateText({ model, prompt, maxOutputTokens: maxTokens, temperature, telemetry: { isEnabled: false } }); // we write the span ourselves here; post 03 lets the SDK do it
+        // The full generateText result is in lesson 01, post 00. Here are just the fields the span's
+        // values come from: `finishReason` and `usage.inputTokens` / `usage.outputTokens`.
+        console.log(`finishReason=${r.finishReason} inputTokens=${r.usage.inputTokens} outputTokens=${r.usage.outputTokens}`);
         span.setAttributes({
           [ATTR_GEN_AI_RESPONSE_FINISH_REASONS]: [r.finishReason],
           [ATTR_GEN_AI_USAGE_INPUT_TOKENS]: r.usage.inputTokens ?? 0,
@@ -72,6 +75,9 @@ async function tracedChat(model: LanguageModel, modelName: string, prompt: strin
         throw e;
       } finally {
         span.end();
+        // The finished span with every gen_ai.* attribute we set. Notice `kind: 2` (CLIENT) and the
+        // name "chat <model>"; on a failure, `status.code: 2`, `error.type` and an "exception" event.
+        dump(`finished span "chat ${modelName}"`, span);
       }
     },
   );
@@ -88,5 +94,8 @@ try {
   await tracedChat(broken, 'this-model-does-not-exist', 'hi');
 } catch (e) {
   console.log('caught:', (e as Error).message.slice(0, 100));
+  // The error the caller gets is the same one the span recorded. Its `name` became error.type; the full
+  // APICallError shape (statusCode, responseBody, isRetryable) is in lesson 06, post 04.
+  console.log('error name (became error.type):', (e as Error).name, '  statusCode:', (e as { statusCode?: number }).statusCode);
 }
 await shutdown();

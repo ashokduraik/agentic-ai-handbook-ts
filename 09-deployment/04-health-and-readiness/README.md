@@ -59,7 +59,21 @@ Open [`example.ts`](./example.ts). `checkReady()` is what post 06's `/readyz` ca
 export async function checkReady(fetchImpl: Fetch = fetch): Promise<{ ready: boolean; reason: string }> {
 ```
 
-That's what lets the offline demo test three Ollama situations with fake answers.
+That's what lets the offline demo test three Ollama situations with fake answers. The live demo uses the same door to show you what Ollama answered: it passes a fetch that logs what Ollama answered first. `dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)).
+
+```ts
+    // A fetch that also logs what Ollama answered, so you can see what checkReady() inspects. Only `status`
+    // and the model names: the full HTTP response shape is in lesson 09, post 01, and each model entry
+    // carries sizes and digests that checkReady() never reads. Notice `models[].name`: the tags are
+    // compared with CHAT_MODEL and EMBED_MODEL.
+    const loggingFetch: Fetch = async (url, init) => {
+      const r = await fetch(url, init);
+      const json = (await r.clone().json()) as { models: { name: string }[] };
+      dump(`GET ${url}: status and model names`, { status: r.status, models: json.models.map((m) => m.name) });
+      return r;
+    };
+    console.log(' ', await checkReady(loggingFetch));
+```
 
 ---
 
@@ -81,7 +95,25 @@ embedding model missing  → ready=false  (not pulled: embed-small)
 Ollama down              → ready=false  (ollama unreachable (TypeError))
 ```
 
-Live on the box: `{ ready: true, reason: 'both models pulled' }`.
+Offline, `checkReady()`'s full return value is the `ready=… (reason)` pair above; there is nothing else in it.
+
+Live, the `/api/tags` answer is logged first, as just the `status` and the model names (your list will differ; trimmed here to three):
+
+```
+▼ GET http://localhost:11434/api/tags: status and model names
+{
+  status: 200,
+  models: [
+    'qwen3.8:latest',
+    'qwen3-embedding:4b',
+    'qwen3:8b',
+    …
+  ]
+}
+  { ready: true, reason: 'both models pulled' }
+```
+
+Only `models[].name` matters to `checkReady()`, so that is all the demo logs. Each real entry also carries `size`, `digest`, `details` and `capabilities`, which are handy when debugging but would bury the point. The full HTTP response shape (headers and all) is in [post 01](../01-validate-at-the-edge/README.md#step-4--look-at-the-full-response).
 
 ## Common gotchas
 

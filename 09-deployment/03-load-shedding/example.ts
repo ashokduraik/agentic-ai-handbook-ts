@@ -12,7 +12,7 @@
  */
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { isMain, section } from '@learn/shared';
+import { dump, isMain, section } from '@learn/shared';
 
 // 1. A limiter is just a counter. tryAcquire() never waits: it says yes or no immediately.
 export function createLimiter(max: number) {
@@ -45,7 +45,21 @@ if (isMain(import.meta.url)) {
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/ask`;
 
   section('[C] Six requests at once, limit 2');
-  const statuses = await Promise.all(Array.from({ length: 6 }, () => fetch(url, { method: 'POST' }).then((r) => r.status)));
+  // The first shed request, as a small object: the full HTTP response shape is in lesson 09, post 01. Notice
+  // status 429, the retry-after header and the JSON body: everything a client needs to back off (the polite
+  // client below uses retry-after).
+  let shownShed = false;
+  const statuses = await Promise.all(
+    Array.from({ length: 6 }, () =>
+      fetch(url, { method: 'POST' }).then(async (r) => {
+        if (r.status === 429 && !shownShed) {
+          shownShed = true;
+          dump('a shed request: 429', { status: r.status, statusText: r.statusText, retryAfter: r.headers.get('retry-after'), json: await r.json() });
+        }
+        return r.status;
+      }),
+    ),
+  );
   console.log('  statuses:', statuses.join(' '));
 
   section('[C] A polite client: wait for retry-after, then try again (at most 3 tries)');

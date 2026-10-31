@@ -75,6 +75,20 @@ export function connectFhirServer(careTeam: string[]) {
       env: { ...(process.env as Record<string, string>), CALLER_CARE_TEAM: careTeam.join(',') },
 ```
 
+### Step 5 — look at what the server returns
+
+This server speaks standard MCP, so the reply shapes are the ones lesson 03 already dumped in full: [`listTools()` and `callTool()`](../../03-mcp/01-what-is-mcp/README.md#step-4--look-at-what-each-call-returned) (see also [post 02, tools](../../03-mcp/02-tools/README.md)) and [`readResource()`](../../03-mcp/03-resources/README.md). So [`example.ts`](./example.ts) prints only the fields this post is about: the tool `name`s and their `annotations`, `isError` plus the text of each result, and a resource's `uri`, `mimeType` and start of its `text`.
+
+```ts
+  // Just the fields this post needs: each tool's `name` and `annotations` (readOnlyHint / destructiveHint),
+  // which posts 04 and 05 rely on. The full listTools() shape (inputSchema and all) is in lesson 03, post 01.
+```
+
+```ts
+  // A refusal is a normal result with `isError: true`, not a thrown error, so the model can read it.
+  console.log(`  isError=${denied.isError}  ${textOf(denied)}`);
+```
+
 ---
 
 ## Run it
@@ -89,6 +103,7 @@ npm run post:02           # no model needed
 ### What you should see
 
 ```
+── [A] Tools and their annotations ──
   search_patients      read-only            Search the caller's patients by name. Returns patient ids for use with other tools.
   get_patient_summary  read-only            Clinical summary for one patient: allergies and active medications.
   find_slots           read-only            Free appointment slots for a specialty, earliest first.
@@ -96,12 +111,25 @@ npm run post:02           # no model needed
   book_appointment     WRITE                Book a free slot for a patient. Requires ids from search_patients and find_slots.
   cancel_appointment   WRITE, destructive   Cancel a booked appointment.
 
-[B] search_patients({ name: "Fatima" })
-  [{"id":"P-001","name":"Fatima Al-Harbi","birthYear":"1961"},{"id":"P-003","name":"Fatima Al-Qahtani","birthYear":"1990"}]
+── [B] search_patients({ name: "Fatima" }) ──
+  isError=false  [{"id":"P-001","name":"Fatima Al-Harbi","birthYear":"1961"},{"id":"P-003","name":"Fatima Al-Qahtani","birthYear":"1990"}]
 
-[C] get_patient_summary for a patient outside the care team
+── [C] get_patient_summary for a patient outside the care team ──
   isError=true  FORBIDDEN: P-002 is not in the caller's care team
+
+── [D] Resource fhir://Patient/P-003 ──
+  fhir://Patient/P-003 (application/fhir+json)
+  {"resourceType":"Patient","id":"P-003","identifier":[{"system":"urn:oid:sa-national-id","value":"1033344455"}],"name":[{ …
 ```
+
+What the fields mean:
+
+| Field | What it tells you |
+|---|---|
+| Tool kind (`read-only`, `WRITE`, `WRITE, destructive`) | Derived from the tool's `annotations` (`readOnlyHint` and `destructiveHint`): what post 05's approval rule reads to decide which tools are writes. |
+| `isError` | `true` for the refusal. It is still a normal result, so the model can explain it. |
+| Result text | A tool result is a list of parts; here one `text` part holds JSON (a projection: ids the model passes to the next tool). |
+| Resource `uri` / `mimeType` | A resource is the raw FHIR JSON, national ID included: it is for the host app, not the model. |
 
 Two patients called Fatima: a good reason for tools to return ids, not just names.
 

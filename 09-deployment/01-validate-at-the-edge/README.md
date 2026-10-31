@@ -52,9 +52,17 @@ export async function readJson(req: IncomingMessage, limitBytes = 16_384): Promi
 
 ```ts
   // 3. The handler: read, validate, and answer with a clear error. Never a stack trace.
+  const shownParse = new Set<boolean>(); // which safeParse() shapes (success / failure) were already dumped
   const server = createServer(async (req, res) => {
     try {
       const parsed = AskBody.safeParse(await readJson(req));
+      // Server side: the full safeParse() result, once per shape (first success, first failure). Notice
+      // `data.question` arrives already trimmed, and a failure carries a ZodError whose `issues` say which
+      // field failed and why (code, path, message). Later requests show up in the summary lines below.
+      if (!shownParse.has(parsed.success)) {
+        shownParse.add(parsed.success);
+        dump('server: AskBody.safeParse() result', parsed);
+      }
       if (!parsed.success) return send(res, 400, { error: 'invalid request', issues: z.flattenError(parsed.error).fieldErrors });
       send(res, 200, { ok: true, question: parsed.data.question }); // post 06 calls the model here
     } catch (e) {
@@ -62,6 +70,23 @@ export async function readJson(req: IncomingMessage, limitBytes = 16_384): Promi
       send(res, status, { error: status === 500 ? 'internal error' : (e as Error).message });
     }
   });
+```
+
+### Step 4 — look at the full response
+
+This is the first HTTP response in the course, so the client helper prints the first one in full. Every later request prints only its one-line summary (`status` and `json`). The later lessons in this folder do the same: they point back here for the full response shape and log just `status` and the JSON fields they care about. `dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)); `headers` is a key it hides, so the headers go under `httpHeaders`.
+
+```ts
+  let firstResponse = true;
+  const post = async (label: string, body: string) => {
+    const r = await fetch(url, { method: 'POST', body });
+    if (firstResponse) {
+      firstResponse = false;
+      // Client side: the first HTTP response in full. Notice `status`, the content-type header, and that the
+      // JSON never contains a stack trace. (clone() leaves the body readable for the line below.) Every
+      // later request prints just `status` and `json` in its summary line.
+      dump(`client: HTTP response (${label})`, { status: r.status, statusText: r.statusText, httpHeaders: Object.fromEntries(r.headers), json: await r.clone().json() });
+    }
 ```
 
 ---
@@ -76,6 +101,58 @@ npm run post:01           # no model needed
 ```
 
 ### What you should see
+
+The first good request prints the server's `safeParse()` result and the full HTTP response. The first failing request prints its `safeParse()` failure. Every request then prints a one-line summary. The `date` header changes every run:
+
+```
+▼ server: AskBody.safeParse() result
+{ success: true, data: { question: 'How much is the no-show deposit?' } }
+▼ client: HTTP response (a good question)
+{
+  status: 200,
+  statusText: 'OK',
+  httpHeaders: {
+    connection: 'keep-alive',
+    'content-type': 'application/json',
+    date: 'Fri, 30 Oct 2026 15:10:00 GMT',
+    'keep-alive': 'timeout=5',
+    'transfer-encoding': 'chunked'
+  },
+  json: { ok: true, question: 'How much is the no-show deposit?' }
+}
+  a good question            → 200 {"ok":true,"question":"How much is the no-show deposit?"}
+▼ server: AskBody.safeParse() result
+{
+  success: false,
+  error: ZodError {
+    name: 'ZodError',
+    issues: [
+      {
+        origin: 'string',
+        code: 'too_small',
+        minimum: 3,
+        inclusive: true,
+        path: [ 'question' ],
+        message: 'Too small: expected string to have >=3 characters'
+      }
+    ]
+  }
+}
+  (hidden for readability: error.stack — set SHOW_RAW=1 to print everything)
+  too short                  → 400 {"error":"invalid request","issues":{"question":["Too small: expected string to have >=3 characters"]}}
+…
+```
+
+What the fields mean:
+
+| Field | What it tells you |
+|---|---|
+| `success` / `data` | Zod's verdict. On success, `data` is the cleaned value (trimmed), and that is what you pass on. |
+| `error.issues[]` | One entry per problem: `code` (e.g. `too_small`, `invalid_type`), `path` (which field) and a `message`. `z.flattenError()` turns these into the `issues` object the client gets. |
+| `status` / `statusText` | 200 for a good question, 400 for a bad one, 413 when the body is too big. |
+| `httpHeaders['content-type']` | Always `application/json`, even for errors, so clients can always parse the reply. |
+
+"not JSON" and "20 KB body" fail inside `readJson()`, before `safeParse()` runs, so they print only their summary line. The summary lines:
 
 ```
 a good question            → 200 {"ok":true,"question":"How much is the no-show deposit?"}

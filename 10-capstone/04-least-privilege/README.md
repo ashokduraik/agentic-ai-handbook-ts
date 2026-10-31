@@ -54,6 +54,19 @@ export const ROLE_TOOLS: Record<Role, string[]> = {
 
 `FORBIDDEN` is returned as a normal tool result, not thrown, so the model can read it and explain to the user.
 
+### Step 3 — look at raw and wrapped results
+
+This is the first time you see what wrapping does, so the demo dumps the raw and the wrapped result for one allowed patient, side by side. The refusals (an id outside the care team, a name instead of an id) print just `isError` and the text: they have the same shape as the server's refusal in [post 02](../02-the-mcp-server/README.md). `dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)).
+
+```ts
+  const rawResult = await raw.get_patient_summary!.execute!({ patientId: 'P-001' }, call);
+  const wrapped = await summary.execute!({ patientId: 'P-001' }, call);
+  // The one full comparison in this post, and the first time you see what wrapping does. Notice the wrapped
+  // result has [NATIONAL_ID] and [PHONE] where the raw one has the numbers.
+  dump('raw get_patient_summary result: P-001', rawResult);
+  dump('wrapped get_patient_summary result: P-001', wrapped);
+```
+
 ---
 
 ## Run it
@@ -72,15 +85,37 @@ npm run post:04           # no model needed
   clinician     search_patients, get_patient_summary, find_slots, list_appointments, book_appointment, cancel_appointment
 
 [B] A patient outside the care team: stopped by the host
-  FORBIDDEN: P-002 is not in your care team
+  isError=true  FORBIDDEN: P-002 is not in your care team
 
 [C] A patient in the care team: raw result vs what the model gets
+▼ raw get_patient_summary result: P-001
+{
+  content: [
+    {
+      type: 'text',
+      text: '{"id":"P-001","name":"Fatima Al-Harbi","nationalId":"1012345678","phone":"0551234567","allergies":["Penicillin (high criticality)"],"activeMedications":[…]}'
+    }
+  ],
+  isError: false
+}
+▼ wrapped get_patient_summary result: P-001
+{
+  content: [
+    {
+      type: 'text',
+      text: '{"id":"P-001","name":"Fatima Al-Harbi","nationalId":"[NATIONAL_ID]","phone":"[PHONE]","allergies":["Penicillin (high criticality)"],"activeMedications":[…]}'
+    }
+  ],
+  isError: false
+}
   raw:     {"id":"P-001","name":"Fatima Al-Harbi","nationalId":"1012345678","phone":"0551234567",…}
   wrapped: {"id":"P-001","name":"Fatima Al-Harbi","nationalId":"[NATIONAL_ID]","phone":"[PHONE]",…}
 
 [D] A name instead of an id
-  FORBIDDEN: Fatima Al-Harbi is not in your care team
+  isError=true  FORBIDDEN: Fatima Al-Harbi is not in your care team
 ```
+
+The host's refusal has the same shape as the server's (`isError` plus `content`), but says "your care team" where the server says "the caller's care team": that wording tells you which layer stopped the call. The wrapped result keeps every field and only replaces the identifiers. The output is the same on every run.
 
 Part D is not hypothetical: small models do this a lot (post 06). The check fails *closed*: anything that isn't a known id is refused.
 

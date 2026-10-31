@@ -13,7 +13,7 @@
  * Run:  npx tsx 07-tool-allow-lists/example.ts            (A + B)
  *       npx tsx 07-tool-allow-lists/example.ts --offline  (A only)
  */
-import { generateText, stepCountIs, tool, type LanguageModel } from 'ai';
+import { generateText, NoSuchToolError, stepCountIs, tool, type LanguageModel } from 'ai';
 import { z } from 'zod';
 import { chatModel, section, stripThinking } from '@learn/shared';
 import { scriptedModel } from '../support/mock-models.ts';
@@ -70,9 +70,15 @@ async function run(label: string, session: Session, prompt: string, model: Langu
   for (const step of result.steps)
     for (const part of step.content) {
       if (part.type === 'tool-call') console.log(`  model asked for: ${part.toolName}(${JSON.stringify(part.input)})`);
+      // In A3 the call to deleteRecord is `invalid: true`: NoSuchToolError, the tool isn't in activeTools.
+      // (Full tool parts: lesson 06, post 03 and lesson 01, post 08.)
+      if (part.type === 'tool-call' && part.invalid && NoSuchToolError.isInstance(part.error)) console.log('  ↳ invalid: true, availableTools:', part.error.availableTools);
       if (part.type === 'tool-result') console.log('  tool result:     ', JSON.stringify(part.output));
       if (part.type === 'tool-error') console.log('  tool error:      ', String(part.error).split('\n')[0]!.slice(0, 100));
     }
+  // How many tool parts there were at all. In A2 the FORBIDDEN answer is a normal tool *result*:
+  // authorization said no, the tool itself worked. In A3 there is no tool-result: execute never ran.
+  console.log('  tool parts:      ', result.steps.flatMap((s) => s.content.filter((p) => p.type.startsWith('tool-'))).length);
   console.log('  model said:      ', stripThinking(result.text).slice(0, 140) || '(nothing)');
 }
 

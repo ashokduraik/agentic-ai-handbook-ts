@@ -85,7 +85,7 @@ The files in `shared/src/`:
 |---|---|
 | `env.ts` | Loads `.env` once. Exports `env`, `required`, `optional`. |
 | `models.ts` | The provider switch. Exports `chatModel`, `embeddingModel`, `modelLabel`. |
-| `util.ts` | Small output helpers. Exports `section`, `show`, `isMain`, `stripThinking`. |
+| `util.ts` | Small output helpers. Exports `section`, `show`, `dump`, `isMain`, `stripThinking`. |
 | `index.ts` | Re-exports all three files, so one import gets everything. |
 | `check-ollama.ts` | A script (not an export) that checks Ollama is running and your models are pulled. |
 
@@ -329,6 +329,64 @@ export function show(label: string, value: unknown) {
 
 Prints strings as they are and pretty-prints everything else as indented JSON. Handy for looking at a structured object the model returned.
 
+### `dump(label, value)` — print the full returned value
+
+```ts
+export function dump<T>(label: string, value: T, opts: { depth?: number } = {}): T {
+```
+
+`show` is fine for a small plain object. But most of the time you want to see **everything a call gave back**: the whole `generateText` result, the full `embed` response, an MCP `listTools` reply, a LangGraph state. That's what `dump` is for, and every example calls it right after its important calls:
+
+```ts
+const result = await generateText({ model: chatModel(), prompt: 'Reply with exactly: toolkit works' });
+dump('generateText() result', result);
+```
+
+It prints a labelled block like this (real output, trimmed):
+
+```
+▼ generateText() result
+DefaultGenerateTextResult {
+  content: [ { type: 'text', text: 'toolkit works' } ],
+  text: 'toolkit works',
+  …
+  finishReason: 'stop',
+  response: {
+    id: 'aitxt-qpAHcjpgPvKXuNvDvafOncAI',
+    modelId: 'qwen3:0.6b',
+    headers: [hidden headers: 3 keys],
+    …
+  },
+  usage: { inputTokens: 22, … outputTokens: 4, … totalTokens: 26 },
+  steps: [ DefaultStepResult { … } ],
+  …
+}
+  (hidden for readability: response.headers, steps[].response.headers — set SHOW_RAW=1 to print everything)
+```
+
+Why not just `console.log(result)`? Try it once: you'll see almost nothing useful. The AI SDK's result objects are **classes whose data lives behind getters** (`result.text` is computed when you read it), and `console.log` doesn't run getters. `dump` does a little work first so the output is both complete and readable:
+
+| What `dump` does | Why |
+|---|---|
+| Reads class getters and prints the class name (`DefaultGenerateTextResult { … }`) | So you see `text`, `usage`, `steps`… and know what kind of object you got back. |
+| Pretty-prints with Node's `util.inspect` (colours in a terminal, nested objects to depth 10) | Easier to read than `JSON.stringify`, and it can show `Date`s, `Map`s and class names. |
+| Shortens long number arrays: `[1024 numbers: -0.018, -0.023, …]` | An embedding is hundreds or thousands of numbers. The length and the first few values are what you need to see. Short lists of whole numbers, like token ids, are printed in full (up to 64). |
+| Hides noisy transport fields (`body`, `headers`, raw payloads, a `providerMetadata` bigger than 400 characters) and prints one line listing what it hid | Raw HTTP bodies are long and repeat what is already shown. The note tells you they exist. |
+| Prints errors as their fields (`name`, `message`, `statusCode`, `isRetryable`, `cause`, Zod's `issues`…) and hides the stack trace, an API error's `responseHeaders` and `requestBodyValues` | The fields tell you what went wrong and whether a retry can help; the stack only says where in `node_modules` it was thrown. |
+| Hides LangChain's `lc_*` fields (`lc_kwargs`, `lc_namespace`, …) on messages from LangChain and LangGraph | They are serialisation bookkeeping: `lc_kwargs` repeats every field of the message a second time. |
+| Marks the SDK's convenience aliases (`finalStep`, `responseMessages`, `staticToolCalls`…) as `[same as …]` / `[subset of …]` | They repeat data printed elsewhere in the same object. |
+| Leaves out fields that are `undefined`, rounds decimals of 1 or more (timings, BM25 scores) to 2 places (smaller ones, like cosine scores, stay exact), and cuts strings longer than 1,200 characters | Less noise; nothing important is lost. |
+
+Anything in `[square brackets]` like `[hidden headers: 3 keys]` is `dump`'s note, **not** part of the data.
+
+**Seeing everything.** Set `SHOW_RAW=1` (in `.env`, or just for one run) and `dump` prints the value untouched, at full depth, with nothing hidden or shortened:
+
+```bash
+SHOW_RAW=1 npm run post:00
+```
+
+Two more small details: `dump` returns the value you pass in, so `const r = dump('r', await f())` works, and colours are switched off automatically when you pipe the output to a file (or set `NO_COLOR=1`).
+
 ### `isMain(import.meta.url)`
 
 ```ts
@@ -469,7 +527,7 @@ If the vendor offers an **OpenAI-compatible endpoint** (many do, as do vLLM, LM 
 - It exists so that **models live only in `.env`** and **changing provider is a config change**.
 - `chatModel()` / `embeddingModel()` read `AI_PROVIDER` and the model name, and return an AI SDK model object. They don't call the model.
 - Pass an id (`chatModel(env.fallbackModel!)`) to use a second model on the same provider.
-- `section`, `show`, `modelLabel` are for readable output. `stripThinking` removes a reasoning model's `<think>` block before you use the answer.
+- `section`, `show`, `modelLabel` are for readable output. `dump` prints the **full** value a call returned (set `SHOW_RAW=1` to see it untouched). `stripThinking` removes a reasoning model's `<think>` block before you use the answer.
 - Run `npm run check:ollama` whenever something seems wrong with your local setup.
 
 ---

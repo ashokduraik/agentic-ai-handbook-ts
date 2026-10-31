@@ -37,9 +37,11 @@ section('[A+B] Cases');
 let passed = 0;
 for (const c of cases) {
   const r = await ask(c.question, AbortSignal.timeout(60_000));
+  // `r` is the service's AskResult (post 06; first dumped there). Only the fields the gate reads: the answer
+  // text, `answerable` and `citationsValid`.
   const ok = c.unanswerable ? !r.answerable : r.answerable && r.citationsValid && c.mustContain!.test(r.answer);
   if (ok) passed++;
-  console.log(`  ${ok ? '✅' : '❌'} ${c.question}\n     → ${JSON.stringify(r.answer.slice(0, 120))}`);
+  console.log(`  ${ok ? '✅' : '❌'} ${c.question}\n     → ${JSON.stringify(r.answer.slice(0, 120))}  (answerable: ${r.answerable}, citationsValid: ${r.citationsValid})`);
 }
 
 // 3. The gate. In CI a non-zero exit code fails the job, and the pull request shows a red ❌.

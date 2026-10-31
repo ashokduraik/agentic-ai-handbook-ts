@@ -96,6 +96,26 @@ Notice `maxRetries: 0`. If the SDK retried inside the breaker, one "failure" wou
 
 A threshold of 2 and a 500 ms cool-down, so the demo is quick. After the cool-down, a working model is used as the probe.
 
+### Look at each error
+
+```ts
+    if (APICallError.isInstance(e)) {
+      console.log(`  → APICallError statusCode=${e.statusCode} isRetryable=${e.isRetryable}${e.responseBody ? ` responseBody=${e.responseBody}` : ''}`);
+    } else if (!shownOpenError) {
+      shownOpenError = true;
+      dump(`${label.trim()}: caught error`, e);
+    }
+```
+
+`callThrough` prints one summary line per call. For a real failure it logs the fields that matter; the full `APICallError` shape was dumped in [post 04](../04-timeouts-and-retries/README.md#step-2--turning-retries-off). For the breaker's own refusal it `dump()`s ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) the full error, the first time only. Two very different errors reach the same `catch`:
+
+| Error | Fields | Meaning |
+|---|---|---|
+| `APICallError` (calls 1–2) | `url`, `statusCode`, `isRetryable`, and from a real server `responseBody` | A request went out and the server said no. `responseBody` is the provider's own explanation. |
+| plain `Error` (calls 3–4) | only `name` and `message: 'circuit open for …'` | The breaker refused. No `url`, no `statusCode`: **no request was sent**. That's why these take 0 ms. |
+
+In your own logs, the presence of `statusCode` is the quickest way to tell "the provider is failing" from "we stopped calling it".
+
 ---
 
 ## Run it
@@ -112,6 +132,23 @@ npm run post:05           # A + B (uses your Ollama server)
 
 - **Part A**: calls 1–2 fail with the 503 and the state becomes `open`. Calls 3–4 fail with `circuit open for mock-model` in about **0 ms**. After the cool-down the state is `half-open`, and the probe succeeds and closes it.
 - **Part B**: calls 1–2 fail with Ollama's `Not Found` error, then calls 3–4 are refused instantly by the open circuit. (With Azure or Bedrock you'd see their own "deployment/model not found" messages; those providers are untested here.)
+
+Part B against a local Ollama, trimmed with "…" (the timings vary):
+
+```
+── [B] Your Ollama server with a model id that does not exist ──
+call 1: ❌ Not Found                                          26 ms  state=closed
+  → APICallError statusCode=404 isRetryable=false responseBody={"error":"model 'model-that-does-not-exist' not found"}
+call 2: ❌ Not Found                                          4 ms  state=open
+…
+call 3: ❌ circuit open for model-that-does-not-exist         0 ms  state=open
+▼ call 3: caught error
+Error { name: 'Error', message: 'circuit open for model-that-does-not-exist' }
+  (hidden for readability: stack — set SHOW_RAW=1 to print everything)
+call 4: ❌ circuit open for model-that-does-not-exist         0 ms  state=open
+```
+
+The `message` is only `Not Found`; the real reason is in `responseBody` (`model '…' not found`). Note `isRetryable=false`: a 404 won't fix itself, so the SDK's retries would not have helped either. Part A's mock 503 errors log `statusCode=503 isRetryable=true` and no `responseBody`.
 
 ## Common gotchas
 

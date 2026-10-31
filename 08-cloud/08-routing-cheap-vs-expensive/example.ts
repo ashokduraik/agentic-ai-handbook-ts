@@ -59,12 +59,19 @@ section(`[A] Gateway   smart=${smartId}   fast=${fastId}`);
 for (const q of questions) {
   const alias = route(q);
   const t0 = performance.now();
-  const { text } = await generateText({ model: gateway.languageModel(alias), prompt: q });
+  const result = await generateText({ model: gateway.languageModel(alias), prompt: q });
   section(`[B] ${alias} · ${Math.round(performance.now() - t0)} ms`);
+  // The full result is in lesson 01, post 00. Here: `response.modelId`, the model the router picked.
+  // The first question is asked twice: the second time, the cache replays the stored response and the
+  // ledger is not charged.
+  console.log(`response.modelId=${result.response.modelId}`);
+  const { text } = result;
   console.log(`Q: ${q}\nA: ${text.replace(/<think>[\s\S]*?<\/think>/g, '').trim().slice(0, 200)}`);
 }
 
 section('[C] Ledger and cache');
 console.table(Object.fromEntries(ledger.rows));
 console.log(`cache hits=${cache.stats.hits} misses=${cache.stats.misses}   total spent $${ledger.spent().toFixed(4)}`);
+// The ledger table and these counters are the shapes from posts 06 and 07 (`ledger.rows`, `cache.stats`).
+// Notice the cache hit does NOT appear in the ledger: `calls` counts only requests that reached a model.
 if (offline && (cache.stats.hits !== 1 || ledger.rows.size !== 2)) throw new Error('expected 1 cache hit and 2 models used');

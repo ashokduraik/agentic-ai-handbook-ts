@@ -18,7 +18,7 @@ import OpenAI from 'openai';
 import { Factuality, Faithfulness, init } from 'autoevals';
 import { DOCS_DIR, HybridStore, answer, chunkMarkdown, ingestDir, retrieve, type Hit } from '@learn/rag';
 import { fakeEmbed, fakeModel } from '@learn/rag/offline-fakes';
-import { chatModel, env, optional, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, env, optional, section, stripThinking } from '@learn/shared';
 import { cases } from '../02-golden-dataset/dataset.ts';
 import { codeChecks } from '../03-code-checks/checks.ts';
 import { faithfulness } from '../04-llm-judge-faithfulness/faithfulness.ts';
@@ -53,7 +53,9 @@ let judgeFailures = 0;
 async function judge(fn: () => Promise<{ score: number | null }> | { score: number | null }) {
   judgeCalls++;
   try {
-    return (await fn()).score;
+    const result = await fn();
+    // Only the score is kept (the full judge results are in posts 04 and 05); it lands in the report row.
+    return result.score;
   } catch {
     judgeFailures++;
     return null;
@@ -73,16 +75,24 @@ for (const c of cases) {
   const r = await runApp(c.question).catch((e: Error) => ({
     answer: `ERROR: ${e.message.slice(0, 80)}`, answerable: true, citationsValid: false, sources: [] as string[], contexts: [] as Hit[],
   })); // an app crash is a failed case, not a crashed eval run
+  const first = rows.length === 0;
+  // The full app result for the first case: the answer() fields from lesson 04 plus `sources`, the
+  // retrieved files best-first. Every code check below reads only these fields.
+  if (first) dump(`runApp() result for "${c.id}"`, r);
   const row: Row = { id: c.id, ...codeChecks(c, r), faithLocal: null, faithful: null, factual: null };
   if (useJudge && c.answerable) {
     const context = r.contexts.map((t) => t.text);
     row.faithLocal = await judge(() => faithfulness(judgeModel, r.answer, context));
     if (useAutoevals) {
       row.faithful = await judge(() => Faithfulness({ input: c.question, output: r.answer, context }));
-      if (c.reference) row.factual = await judge(() => Factuality({ input: c.question, output: r.answer, expected: c.reference }));
+      if (c.reference)
+        row.factual = await judge(() => Factuality({ input: c.question, output: r.answer, expected: c.reference }));
     }
   }
   row.ms = Math.round(performance.now() - t0);
+  // One row of the report, for the first case. Notice the nulls: a check that doesn't apply
+  // (or a judge that failed) is left out of the averages instead of counting as a pass or a fail.
+  if (first) dump(`report row for "${c.id}"`, row);
   rows.push(row);
   console.log(`${c.id.padEnd(24)} ${r.answer.replace(/\s+/g, ' ').slice(0, 90)}`);
 }

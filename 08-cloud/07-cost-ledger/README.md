@@ -51,14 +51,29 @@ Open [`example.ts`](./example.ts). `createLedger()` returns the middleware, the 
 ### Step 3 — prices are configuration
 
 ```ts
-  // 3. Prices are configuration. Offline uses made-up prices that make the budget trip quickly.
-  const prices: Prices = {
-    inPerMTok: Number(optional('PRICE_PER_MTOK_IN', offline ? '2000' : '0')),
-    outPerMTok: Number(optional('PRICE_PER_MTOK_OUT', offline ? '8000' : '0')),
-  };
+  // 3. Prices are configuration. Offline ignores .env and uses made-up prices that trip the $0.30
+  // budget after three mock calls (so `test:offline` is stable even when PRICE_* is 0 in .env).
+  const prices: Prices = offline
+    ? { inPerMTok: 2000, outPerMTok: 8000 }
+    : {
+        inPerMTok: Number(optional('PRICE_PER_MTOK_IN', '0')),
+        outPerMTok: Number(optional('PRICE_PER_MTOK_OUT', '0')),
+      };
 ```
 
 The offline prices are absurdly high on purpose, so a $0.30 budget runs out after three questions.
+
+### Step 4 — the numbers behind the table
+
+```ts
+      if (q === questions[0]) console.log(`     first call usage: inputTokens=${r.usage.inputTokens} outputTokens=${r.usage.outputTokens}`);
+```
+
+```ts
+  dump('ledger.rows', ledger.rows);
+```
+
+We log only the first call's usage (the full result and [all its fields](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned) are in lesson 01, post 00), and the budget error's message is in the `⛔` line. [`dump`](../../shared/README.md#dumplabel-value--print-the-full-returned-value) prints the raw ledger `Map` behind the table: this is the first time the course shows it.
 
 ---
 
@@ -85,7 +100,19 @@ Offline:
 ⛔ Who do I call after hours?       Budget of $0.3 reached: refusing a new call to mock-model
 ```
 
-Notice that spending ended at $0.396, **over** the $0.30 budget: the third call started at $0.264 (under budget) and finished above it. Live on the box, five calls used 113 input and 370 output tokens, at $0.
+Around those lines (trimmed with "…"):
+
+```
+✅ When is the lab open?            spent so far $0.1320
+     first call usage: inputTokens=30 outputTokens=9
+…
+▼ ledger.rows
+Map(1) { 'mock-model' => { calls: 3, input: 90, output: 27, usd: 0.396 } }
+```
+
+One call: 30 × $2,000 + 9 × $8,000 per million tokens = $0.132, which is the first "spent so far". The budget error is a plain `Error` thrown by our middleware before `doGenerate()`, so no model was called and no tokens were used.
+
+Notice that spending ended at $0.396, **over** the $0.30 budget: the third call started at $0.264 (under budget) and finished above it. Live on the box, five calls cost $0 (no prices set). Token counts differ between runs: one run used 113 input and 370 output tokens; a later one 113 and 615 (`Map(1) { 'qwen3:0.6b' => { calls: 5, input: 113, output: 615, usd: 0 } }`).
 
 ## Common gotchas
 

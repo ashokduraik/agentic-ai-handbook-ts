@@ -14,7 +14,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cosineSimilarity, embed, embedMany } from 'ai';
-import { embeddingModel, env, section } from '@learn/shared';
+import { dump, embeddingModel, env, section } from '@learn/shared';
 import { DOCS_DIR, chunkMarkdown } from '../pipeline/rag.ts';
 import { fakeEmbed } from '../pipeline/offline-fakes.ts';
 
@@ -27,10 +27,18 @@ const chunks = readdirSync(DOCS_DIR)
 
 // 1. Embed all chunks in one batched call. Embed "heading + text": the heading adds context.
 const texts = chunks.map((c) => `${c.heading}\n${c.text}`);
-const chunkVectors = offline ? texts.map(fakeEmbed) : (await embedMany({ model: embeddingModel(), values: texts })).embeddings;
+const many = offline ? { embeddings: texts.map(fakeEmbed) } : await embedMany({ model: embeddingModel(), values: texts });
+// Only the fields this post needs (the full embedMany result is in lesson 01, post 06). Notice `embeddings`
+// has one vector per input, in the SAME order as `values`; `usage.tokens` is what you pay (offline: no usage).
+console.log('embedMany: embeddings.length =', many.embeddings.length, '| usage.tokens =', 'usage' in many ? many.usage.tokens : 'n/a (offline)');
+const chunkVectors = many.embeddings;
 
 // 2. Embed the question with the SAME model (vectors from different models are not comparable).
-const queryVector = offline ? fakeEmbed(question) : (await embed({ model: embeddingModel(), value: question })).embedding;
+const one = offline ? { embedding: fakeEmbed(question) } : await embed({ model: embeddingModel(), value: question });
+// ONE `embedding` for the question, the same length as every chunk vector (printed below). That equal
+// length is what makes cosine similarity possible. (Full embed result: lesson 01, post 06.)
+console.log('embed: usage.tokens =', 'usage' in one ? one.usage.tokens : 'n/a (offline)');
+const queryVector = one.embedding;
 
 section(`What an embedding looks like (${offline ? 'fake' : env.embedModel})`);
 console.log(`${chunkVectors[0]!.length} numbers, starting [${chunkVectors[0]!.slice(0, 5).map((n) => n.toFixed(3)).join(', ')}, …]`);
@@ -41,4 +49,7 @@ const ranked = chunks
   .map((c, i) => ({ heading: c.heading, score: cosineSimilarity(queryVector, chunkVectors[i]!) }))
   .sort((a, b) => b.score - a.score);
 ranked.slice(0, 3).forEach((r, i) => console.log(`  ${i + 1}. ${r.score.toFixed(3)}  ${r.heading}`));
+// The raw top hits. Notice the scores are close together: cosine scores are only meaningful
+// relative to each other, not as absolute "percent relevant".
+dump('top 3 hits', ranked.slice(0, 3));
 console.log(`  …  lowest: ${ranked.at(-1)!.score.toFixed(3)}  ${ranked.at(-1)!.heading}`);

@@ -95,10 +95,17 @@ If a policy is deleted, its chunks must go too. The simplest correct approach fo
 
 ```ts
 const queryVector = offline ? fakeEmbed(question) : (await embed({ model: embeddingModel(), value: question })).embedding;
-store.vectorSearch(queryVector, 3).forEach((h, i) => console.log(`  ${i + 1}. ${h.score.toFixed(3)}  ${h.heading}  [${h.id}]`));
+const hits = store.vectorSearch(queryVector, 3);
+hits.forEach((h, i) => console.log(`  ${i + 1}. ${h.score.toFixed(3)}  ${h.heading}  [${h.id}]`));
 ```
 
 Only the question is embedded now.
+
+```ts
+dump('store.vectorSearch() result', hits);
+```
+
+`dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) prints the full `Hit[]`. A `Hit` is a `Chunk` read back from SQLite (`id`, `source`, `heading`, `text`) plus `score`, the cosine similarity. There is **no embedding** in a hit: `vectorSearch` strips it (`({ embedding, ...c })`), because callers need the text, not 1024 numbers.
 
 ---
 
@@ -129,6 +136,30 @@ stored 15 chunks in 1667 ms
 ── 4. Reopen the file (as another process would) ──
 a new HybridStore on …/data/rag.db has 15 chunks
 ```
+
+The full hits (a real run, trimmed at `…`):
+
+```
+▼ store.vectorSearch() result
+[
+  {
+    id: 'visiting-hours.md#2',
+    source: 'visiting-hours.md',
+    heading: 'Visiting Hours Policy (Al Noor General Hospital — fictional) › Pediatric ward',
+    text: 'One parent or legal guardian may stay with the child 24 hours a day. Siblings may visit during general visiting hours.',
+    score: 0.6004454667311717
+  },
+  {
+    id: 'visiting-hours.md#1',
+    …
+    text: 'ICU visiting is limited to immediate family, 11:00–12:00 and 18:00–19:00. Visitors must perform hand hygiene and wear a gown. Children under 12 may not visit the ICU unless approved by the charge nurse.',
+    score: 0.5728799285335688
+  },
+  …
+]
+```
+
+Scores can differ in the third decimal from post 03 (0.600 here, 0.597 there) and between runs: the store saves vectors as Float32, and the embedding model's output can vary slightly.
 
 You may also see `ExperimentalWarning: SQLite is an experimental feature`; that's Node telling you `node:sqlite` is new. It's safe for this course.
 

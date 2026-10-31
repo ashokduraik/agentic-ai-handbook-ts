@@ -60,8 +60,14 @@ const cases = [
 ```
 
 ```ts
+  // `r` is the service's AskResult (post 06; first dumped there). Only the fields the gate reads: the answer
+  // text, `answerable` and `citationsValid`.
   const ok = c.unanswerable ? !r.answerable : r.answerable && r.citationsValid && c.mustContain!.test(r.answer);
+  if (ok) passed++;
+  console.log(`  ${ok ? '✅' : '❌'} ${c.question}\n     → ${JSON.stringify(r.answer.slice(0, 120))}  (answerable: ${r.answerable}, citationsValid: ${r.citationsValid})`);
 ```
+
+`ask()` is post 06's pipeline: retrieval plus a grounded `generateText()`, returned as an `AskResult`. Its full shape was dumped in [post 06](../06-the-rag-service/README.md#step-6--look-at-the-responses), so the gate logs only the three fields it reads.
 
 ### Step 3 — the exit code is the gate
 
@@ -91,9 +97,37 @@ To turn on the real gate on GitHub: *Settings → Secrets and variables → Acti
 
 ### What you should see
 
-Offline: `score 0.67  threshold 0.6 → PASS ✅`, and with `EVAL_THRESHOLD=0.9`: `FAIL ❌ (exit code 1)`.
+Offline (the fake answers on purpose get the refill case wrong):
 
-Live on the box: the deposit (`"100"`) and refill (`"2 working days"`) cases passed. The dental-implants case **failed**: the model marked it answerable with the answer `"false"`. Score 0.67, so the gate passed at 0.6; a stricter threshold would have caught it. That's what the gate is for.
+```
+  ✅ How much is the deposit after three no-shows?
+     → "A SAR 100 deposit [1]."  (answerable: true, citationsValid: true)
+  ❌ How long does a refill approval take?
+     → "Within a week [1]."  (answerable: true, citationsValid: true)
+  ✅ Do you offer dental implants?
+     → "I do not know."  (answerable: false, citationsValid: true)
+
+── [C] Gate ──
+  score 0.67  threshold 0.6  → PASS ✅
+```
+
+With `EVAL_THRESHOLD=0.9`: `FAIL ❌ (exit code 1)`.
+
+Live (`qwen3.8:latest`, `qwen3-embedding:4b`), the latest run passed all three:
+
+```
+  ✅ How much is the deposit after three no-shows?
+     → "SAR 100"  (answerable: true, citationsValid: true)
+  ✅ How long does a refill approval take?
+     → "2 working days"  (answerable: true, citationsValid: true)
+  ✅ Do you offer dental implants?
+     → "Based on the provided sources, it is not possible to determine whether dental implants are offered. The sources only con"  (answerable: false, citationsValid: true)
+
+── [C] Gate ──
+  score 1.00  threshold 0.6  → PASS ✅
+```
+
+For the dental case, `answerable: false` is what passes it; the gate ignores the text of the answer. Results change between runs. In an earlier run, on `qwen3:0.6b`, the deposit (`"100"`) and refill (`"2 working days"`) cases passed. The dental-implants case **failed**: the model marked it answerable with the answer `"false"`. Score 0.67, so the gate passed at 0.6; a stricter threshold would have caught it. That's what the gate is for.
 
 The GitHub workflow itself was not run by the course author (only its files and commands were checked).
 

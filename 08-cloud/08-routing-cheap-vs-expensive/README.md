@@ -75,8 +75,14 @@ function route(question: string): Alias {
 ```
 
 ```ts
-  const { text } = await generateText({ model: gateway.languageModel(alias), prompt: q });
+  const result = await generateText({ model: gateway.languageModel(alias), prompt: q });
 ```
+
+```ts
+  console.log(`response.modelId=${result.response.modelId}`);
+```
+
+`response.modelId` shows which model the router picked; the full result and [all its fields](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned) are in lesson 01, post 00. The first question is asked twice: once as a miss and once as a cache hit. At the end the example prints the ledger table and the cache counters, as before. The raw `ledger.rows` and `cache.stats` records are dumped in [post 07](../07-cost-ledger/README.md) and [post 06](../06-response-cache/README.md), so we don't repeat them here.
 
 ---
 
@@ -94,6 +100,8 @@ npm run post:08           # fast = FALLBACK_MODEL, smart = CHAT_MODEL (or FAST_M
 
 Live on the box (`fast` = `qwen2.5:0.5b`, `smart` = `qwen3:0.6b`):
 
+Times, token counts and answers differ between runs. One run, condensed:
+
 ```
 [B] fast · 615 ms     Q: What time should I arrive?
 [B] fast · 1 ms       Q: What time should I arrive?            ← cache hit
@@ -103,6 +111,20 @@ Live on the box (`fast` = `qwen2.5:0.5b`, `smart` = `qwen3:0.6b`):
 │ qwen3:0.6b   │ 1 │ 37 │ 55  │ 0 │
 cache hits=1 misses=3
 ```
+
+A later run, with the extra `response.modelId` line (trimmed with "…"):
+
+```
+── [B] fast · 2024 ms ──────────────────────────────────────────
+response.modelId=qwen2.5:0.5b
+Q: What time should I arrive?
+…
+── [C] Ledger and cache ────────────────────────────────────────
+…
+cache hits=1 misses=3   total spent $0.0000
+```
+
+`response.modelId` shows the router's choice. In the first run above, the ledger table counts only 2 calls for `qwen2.5:0.5b` (the first ask and the radiology question): the cache hit never reached it.
 
 Routing worked, but look at the radiology answer: the "fast" model misread the question and wrote a 300-token essay about what radiology *is*, taking longer than the "smart" model. Cheap per token isn't cheap per answer if the model rambles. With models this small, both answers are weak; with real cloud models the difference is clearer, and the ledger shows the saving.
 

@@ -13,7 +13,7 @@
  */
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { generateText } from 'ai';
-import { chatModel, env, section } from '@learn/shared';
+import { chatModel, dump, env, section } from '@learn/shared';
 import { captureFetch, mask } from '../support/fakes.ts';
 
 const { fetch, requests } = captureFetch();
@@ -36,6 +36,9 @@ console.log({
   authorization: r.headers['authorization']?.split(',')[0], // "AWS4-HMAC-SHA256 Credential=<key id>/<date>/<region>/bedrock/aws4_request"
   'x-amz-date': r.headers['x-amz-date'],
 });
+// The whole JSON body Bedrock's Converse API would receive. Notice there is no model id in it (it is in
+// the URL) and the prompt is `messages` with `content: [{ text }]` blocks.
+dump('request body (Converse API)', r.body);
 
 section('[A2] A credential provider (SSO, profiles, IAM roles)');
 // In production: import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
@@ -56,6 +59,10 @@ if (env.provider !== 'bedrock') {
   console.log(`\n[B] skipped: AI_PROVIDER is "${env.provider}". Set AI_PROVIDER=bedrock, AWS_REGION and credentials in .env to call Bedrock for real.`);
 } else {
   section('[B] A real call to Bedrock');
-  const { text, usage } = await generateText({ model: chatModel(), prompt: 'In one sentence: what is triage?', maxOutputTokens: 200 });
+  const result = await generateText({ model: chatModel(), prompt: 'In one sentence: what is triage?', maxOutputTokens: 200 });
+  // The full result has the same fields as on Ollama (lesson 01, post 00). Log only the Bedrock-specific
+  // parts: `response.modelId` and the provider adapter that ran.
+  console.log('response.modelId:', result.response.modelId, '  steps[0].model.provider:', result.steps[0]!.model.provider);
+  const { text, usage } = result;
   console.log(text, usage);
 }

@@ -109,6 +109,27 @@ messages.push(...result.response.messages); // remember what the model said (tex
 
 One model call per step. We pass the **whole** `messages` array every time, then append whatever the model said (its tool-call request or its text) so the next step can see it.
 
+Right after the call, the file prints a short summary of what came back. We do not dump the raw objects here, because we saw the tool-call and tool-result shapes in [lesson 01, post 08](../../01-foundations-structured-output/08-tool-calling/README.md):
+
+```ts
+// The model's decision, in short. We do not dump the raw toolCalls / toolResults objects: lesson 01
+// post 08 already showed them. Each tool call has a `toolCallId`, a `toolName` and the `input` the
+// model chose; the "model asked" line below prints the name and input. An empty list means "I'm done".
+console.log('toolCalls requested:', result.toolCalls.length);
+// No `execute` on our tool, so the SDK never runs it and `toolResults` stays empty:
+// running the tool is OUR job (below).
+console.log('toolResults from the SDK:', result.toolResults.length, '(always 0 here: we run the tool ourselves)');
+// What we append to the memory: the roles of the messages in `result.response.messages`. It is one
+// assistant message whose `content` holds the 'tool-call' part(s), or the final 'text' part.
+console.log('response.messages (roles):', result.response.messages.map((m) => m.role));
+```
+
+- **`result.toolCalls`** is the model's decision: a list of `{ type: 'tool-call', toolCallId, toolName, input }`. An empty list means "I'm done". We print only how many there are; the name and input come out in the `model asked:` line in Step 5.
+- **`result.toolResults`** stays empty in this post. Our tool has no `execute`, so the SDK never runs it: running it is *our* job (Step 5). Compare with lesson 01 post 08, where the SDK ran the tools and this list was filled.
+- **`result.response.messages`** is exactly what we push onto the memory: one `assistant` message whose `content` holds the `tool-call` part (step 1) or the final `text` part (step 2). We print just the roles. You will see the full messages at the end, in Step 6.
+
+(The other fields of a `generateText` result are explained in [the field guide](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned).)
+
 ### Step 5 — finished, or act and observe
 
 ```ts
@@ -136,6 +157,15 @@ Otherwise we **act** (run each requested tool) and **observe** (push a `tool` me
 
 The loop then goes round again, and the model decides with the new facts in front of it.
 
+### Step 6 — the memory, at the end
+
+```ts
+section('The whole conversation the loop built');
+dump('messages', messages);
+```
+
+This array **is** the agent's state. Read it top to bottom and you can replay the whole run: `user` → `assistant` (a `tool-call`) → `tool` (a `tool-result` with the **same `toolCallId`**, our JSON in `output.value`) → `assistant` (the `text` answer). Posts 02–08 keep exactly this kind of list inside a LangGraph state.
+
 ---
 
 ## Run it
@@ -151,6 +181,59 @@ npm run post:01
 
 - **Step 1**: `finishReason = tool-calls`, then `model asked: list_appointments({"patientId":"P-001"})` and the two appointments your code returned.
 - **Step 2**: `finishReason = stop` and a final answer like *"P-001 is seeing radiology on 2026-11-05 at 14:00."*
+- After each step, a short summary: how many tool calls were requested, how many tool results the SDK produced (always 0 here), and the roles in `response.messages`. At the end, the whole `messages` array in full.
+
+A real run with a small `qwen3:0.6b` (trimmed at `…`):
+
+```
+── Step 1: the model decides ───────────────────────────────────
+finishReason = tool-calls
+toolCalls requested: 1
+toolResults from the SDK: 0 (always 0 here: we run the tool ourselves)
+response.messages (roles): [ 'assistant' ]
+model asked: list_appointments({"patientId":"P-001"})
+we returned: [{"id":"A-100","patientId":"P-001","dept":"cardiology","when":"2026-11-03 09:30"},{"id":"A-101","patientId":"P-001","dept":"radiology","when":"2026-11-05 14:00"}]
+
+── Step 2: the model decides ───────────────────────────────────
+finishReason = stop
+toolCalls requested: 0
+toolResults from the SDK: 0 (always 0 here: we run the tool ourselves)
+response.messages (roles): [ 'assistant' ]
+Final answer: Patient P-001 is seeing radiology on **2026-11-05 14:00**.
+
+── The whole conversation the loop built ───────────────────────
+▼ messages
+[
+  { role: 'user', content: 'When is patient P-001 seeing radiology?' },
+  {
+    role: 'assistant',
+    content: [ { type: 'tool-call', toolCallId: 'call_8ltet4k2', toolName: 'list_appointments', input: { patientId: 'P-001' } } ]
+  },
+  {
+    role: 'tool',
+    content: [
+      {
+        type: 'tool-result',
+        toolCallId: 'call_8ltet4k2',
+        toolName: 'list_appointments',
+        output: {
+          type: 'json',
+          value: [
+            { id: 'A-100', patientId: 'P-001', dept: 'cardiology', when: '2026-11-03 09:30' },
+            { id: 'A-101', patientId: 'P-001', dept: 'radiology', when: '2026-11-05 14:00' }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    role: 'assistant',
+    content: [ { type: 'text', text: 'Patient P-001 is seeing radiology on **2026-11-05 14:00**.' } ]
+  }
+]
+```
+
+Your `toolCallId` will be different (the provider makes it up), and the wording of the answer may differ.
 
 On the box this was tested with a 0.6 B model. Most runs looked exactly like that. Two kinds of bad run also happened, and both are worth recognising:
 

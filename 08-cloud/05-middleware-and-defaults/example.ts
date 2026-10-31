@@ -10,7 +10,7 @@
  *       npx tsx 05-middleware-and-defaults/example.ts --offline  (a fake model)
  */
 import { defaultSettingsMiddleware, generateText, wrapLanguageModel, type LanguageModelMiddleware } from 'ai';
-import { chatModel, section } from '@learn/shared';
+import { chatModel, dump, section } from '@learn/shared';
 import { MockLanguageModelV4 } from 'ai/test';
 import { fakeModel, type ModelObject } from '../support/fakes.ts';
 
@@ -50,8 +50,14 @@ const governed = (model: ModelObject) =>
 
 const base = offline ? fakeModel('mock-model') : (chatModel() as ModelObject);
 const model = governed(base);
-const ask = (prompt: string, maxOutputTokens?: number) =>
-  generateText({ model, prompt, maxOutputTokens }).then((r) => r.text.replace(/<think>[\s\S]*?<\/think>/g, '').trim().slice(0, 120));
+const ask = async (prompt: string, maxOutputTokens?: number) => {
+  const r = await generateText({ model, prompt, maxOutputTokens });
+  // The full result is in lesson 01, post 00. Notice `steps[0].model`: the wrapped model reports the
+  // base model's provider and id. The defaults the middleware added don't appear in the result at all;
+  // the "sees" lines above (and part C offline) show what the model really received.
+  console.log(`  result: steps[0].model.modelId=${r.steps[0]!.model.modelId}`);
+  return r.text.replace(/<think>[\s\S]*?<\/think>/g, '').trim().slice(0, 120);
+};
 
 section('[A+B] A call that sets nothing: the defaults fill in');
 console.log('  →', await ask('What should I bring to my first appointment? One sentence.'));
@@ -63,6 +69,9 @@ if (base instanceof MockLanguageModelV4) {
   section('[C] What the fake model received (offline self-check)');
   const seen = base.doGenerateCalls.map((c) => ({ temperature: c.temperature, maxOutputTokens: c.maxOutputTokens }));
   console.log(seen);
+  // Everything the fake model received on the first call, after all the middleware ran. Notice
+  // temperature 0 and maxOutputTokens 512 (from the defaults), and the prompt as a list of messages.
+  dump('first call the model received', base.doGenerateCalls[0]);
   if (seen[0]?.maxOutputTokens !== 512 || seen[1]?.maxOutputTokens !== 200 || seen[0]?.temperature !== 0) throw new Error('defaults not applied as expected');
   console.log('✅ defaults applied, and the per-call value won');
 }

@@ -75,6 +75,24 @@ const reranked = await llmRerank(reranker, c.question, candidates, 3);
 
 Both modes see the **same** six candidates, so the only difference is the reranker. Change one thing at a time.
 
+### Look at both rankings for one question
+
+```ts
+const brief = (hits: Hit[]) => hits.forEach((h, i) => console.log(`      ${i + 1}. ${h.score.toFixed(3)}  ${h.heading}`));
+console.log(`    hybrid candidates (expected: ${c.expectedSource}):`);
+brief(candidates);
+console.log('    llmRerank() top 3:');
+brief(reranked);
+```
+
+For the **first** question only (six printed rankings would bury the table) we print each hit as `score  heading`. Both lists hold the same `Hit` objects we saw in lesson 04 ([hybrid hits](../../04-rag/05-hybrid-search/README.md), [`llmRerank` result](../../04-rag/06-reranking/README.md)), so we don't dump them again:
+
+| Field | What it tells you |
+|---|---|
+| `source` | The file the chunk came from. This is the **only** field hit@k looks at: is `expectedSource` among the first k? |
+| `heading` (and `text`) | Which chunk it is. Read it to judge for yourself whether it answers the question. |
+| `score` | In the candidates: the RRF score (tiny, at most 2/61 ≈ 0.033). After `llmRerank`: the judge's 0–10 relevance. |
+
 ### Score
 
 ```ts
@@ -85,6 +103,12 @@ const hit = (hits: Hit[], source: string, k: number) => hits.slice(0, k).some((h
 score[mode].hit1 += Number(hit(hits, c.expectedSource!, 1));
 score[mode].hit3 += Number(hit(hits, c.expectedSource!, 3));
 ```
+
+```ts
+dump('hit counts', { questions: answerable.length, ...score });
+```
+
+This is the one full `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) in this post, and the first **eval score** shape you meet. The raw counts behind the percentage table: `hit1` is how many questions had the right document at rank 1, `hit3` how many had it in the top 3.
 
 ---
 
@@ -100,23 +124,37 @@ npm run post:01:offline    # fake embeddings + a word-overlap "reranker"
 
 ### What you should see
 
-With `qwen3-embedding:0.6b` and `qwen3:0.6b` as the reranker:
+With `qwen3-embedding:0.6b` and `qwen3:0.6b` as the reranker (trimmed with "…"):
 
 ```
 ── Retrieval on 6 golden questions (reranker: ollama:qwen3:0.6b) ──
   noshow-deposit           none: appointment-cancellation.md  llm: appointment-cancellation.md
+    hybrid candidates (expected: appointment-cancellation.md):
+      1. 0.033  Outpatient Appointment Cancellation Policy (fictional) › Late cancellations and no-shows
+      2. 0.032  Outpatient Appointment Cancellation Policy (fictional) › Exceptions
+      …
+    llmRerank() top 3:
+      1. 10.000  Outpatient Appointment Cancellation Policy (fictional) › Late cancellations and no-shows
+      2. 10.000  Outpatient Appointment Cancellation Policy (fictional) › Exceptions
+      3. 10.000  Telehealth Consultations (fictional) › Fees
   cancel-notice            none: appointment-cancellation.md  llm: appointment-cancellation.md
   icu-children             none: visiting-hours.md            llm: visiting-hours.md
   controlled-refill        none: medication-refill.md         llm: medication-refill.md
   discharge-time           none: discharge.md                 llm: discharge.md
-  telehealth-first-visit   none: telehealth.md                llm: visiting-hours.md
+  telehealth-first-visit   none: telehealth.md                llm: telehealth.md
 
 ── The numbers ──
+▼ hit counts
+{ questions: 6, none: { hit1: 6, hit3: 6 }, llm: { hit1: 6, hit3: 6 } }
 │ RERANKER=none │ '100%' │ '100%' │
-│ RERANKER=llm  │ '83%'  │ '100%' │
+│ RERANKER=llm  │ '100%' │ '100%' │
 ```
 
-Argument settled, **for this model and this data**: hybrid search alone already puts the right document first every time; the small reranker moved one wrong document to the top. With these models, `RERANKER=none` is better and faster. With a strong reranking model the answer may flip, and now you have the tool to find out in a minute.
+Look at the reranked list: it gave **10/10** to a telehealth *fees* chunk for a question about no-show deposits. The question still counted as a hit (hit@k only checks `source`), but this is not a judge to trust blindly.
+
+The small reranker's choices change from run to run. In this run it tied with no reranker. In an earlier run it put `visiting-hours.md` first for `telehealth-first-visit`, and its row read `'83%'  │ '100%'`.
+
+Argument settled, **for this model and this data**: hybrid search alone already puts the right document first every time; the small reranker adds nothing and sometimes moves a wrong document to the top. With these models, `RERANKER=none` is better and faster. With a strong reranking model the answer may flip, and now you have the tool to find out in a minute.
 
 Six questions is a tiny sample. One flipped case is 17 percentage points. Grow the dataset (post 02) before trusting small differences.
 

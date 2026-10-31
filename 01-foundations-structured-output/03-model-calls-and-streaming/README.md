@@ -88,7 +88,7 @@ Open [`example.ts`](./example.ts). Part **A** uses `generateText`, part **B** us
 import { generateText, streamText } from 'ai';
 // chatModel() reads AI_PROVIDER + CHAT_MODEL from .env and returns an AI SDK model object
 // (see shared/src/models.ts). Change .env → same code talks to Ollama, Azure or Bedrock.
-import { chatModel, modelLabel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, modelLabel, section, stripThinking } from '@learn/shared';
 ```
 
 This import line is the whole "provider-agnostic" idea. Nothing below it knows which vendor it is talking to. `modelLabel()` just prints which model `.env` picked, so you can see it in the output. It returns a `provider:model` string built from `AI_PROVIDER` and `CHAT_MODEL` ([the `@learn/shared` tour](../../shared/README.md#modellabelid) shows its one line of code).
@@ -115,6 +115,11 @@ console.log('usage:       ', { inputTokens: result.usage.inputTokens, outputToke
 
 In production you would branch on `finishReason` (is the answer complete?) and log `usage` (what did it cost?). Get into the habit now.
 
+Those three lines pick fields out of `result`. We saw the full `generateText()` result in [post 00](../00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned), which has a table of every field, so this file does not dump it again. Two facts are worth remembering from that table:
+
+- **`usage`**: `inputTokens`, `outputTokens`, `totalTokens`. In this SDK version `usage` and `totalUsage` both add up **all** steps; each single model call's count is in `steps[i].usage`.
+- **`steps`**: one entry per model call, each with its own `usage` and a `performance` block (time per step, tokens per second). A plain call has one step; tool calling (post 08) can make several.
+
 ### Step 4 — stream the answer
 
 ```ts
@@ -134,6 +139,36 @@ for await (const piece of stream.textStream) {
 
 `textStream` is an async iterable, so a plain `for await` loop reads it. We print each piece as it arrives (in a web app you would write it to the HTTP response instead), and we record when the **first** piece came. That number is the one your users feel.
 
+### Step 5 — the finished values of a stream
+
+```ts
+dump('await stream.text', await stream.text);
+dump('await stream.finishReason', await stream.finishReason);
+dump('await stream.usage', await stream.usage);
+dump('await stream.steps', await stream.steps);
+```
+
+The stream handle also has the "finished" values, but as **promises**: `stream.text`, `stream.finishReason`, `stream.usage`, `stream.steps` and more. They resolve once the last piece has arrived. Notice they are exactly what `generateText` would have returned. One extra worth noticing in the streamed step's `performance` block: `timeToFirstOutputMs` (the SDK measured time-to-first-token for you) and `timeBetweenOutputChunksMs` (how evenly the pieces arrived).
+
+### Step 6 — `fullStream`: the typed events behind a stream
+
+```ts
+const parts: unknown[] = [];
+for await (const part of streamText({ model: chatModel(), prompt: 'Say: blood pressure is measured in mmHg.', maxOutputTokens: 300 }).fullStream) {
+  parts.push(part);
+}
+```
+
+`textStream` gives you only text. `fullStream` gives you **every event** as an object with a `type`. We collect them all, then print a count per type and the first and last few parts in full:
+
+```ts
+dump('part types and how many of each', counts);
+dump('first 5 parts', parts.slice(0, 5));
+dump('last 3 parts', parts.slice(-3));
+```
+
+The order is always the same: `start` → `start-step` → `text-start` → many `text-delta` parts (each carries one piece in `text`) → `text-end` → `finish-step` (that step's `finishReason`, `usage`, `performance`, `response`) → `finish` (the overall `finishReason` and `totalUsage`). When a model reasons or calls tools, `reasoning-delta`, `tool-call` and `tool-result` parts show up in the same stream. A chat UI that shows "thinking…" or "calling tool…" is reading `fullStream`.
+
 ---
 
 ## Run it
@@ -147,8 +182,104 @@ npm run post:03
 
 ### What you should see
 
-- **Part A** (`generateText`): the one-sentence answer, `finishReason: stop`, the `usage` numbers and the total time.
-- **Part B** (`streamText`): the list appears gradually. The last line reports how many pieces arrived, the **time to first token** (usually a few hundred ms) and the total time (seconds).
+- **Part A** (`generateText`): the one-sentence answer, `finishReason: stop`, the `usage` numbers and the total time. The full result object is not printed again (see post 00).
+- **Part B** (`streamText`): the list appears gradually. The last line reports how many pieces arrived, the **time to first token** (usually a few hundred ms) and the total time (seconds). Then the awaited `text`, `finishReason`, `usage` and `steps`.
+- **Part C** (`fullStream`): how many parts of each type arrived, then the first 5 and last 3 parts.
+
+A real run with a small `qwen3:0.6b` (trimmed at `…`):
+
+```
+── [A] generateText (model from .env: ollama:qwen3:0.6b) ───────
+Answer:       An EHR is an electronic health record that contains all the medical information a patient has, including their health history, medications, and test results.
+finishReason: stop   ← "stop" = finished; "length" = cut off by maxOutputTokens
+usage:        { inputTokens: 26, outputTokens: 30 }
+time:         501 ms
+
+── [B] streamText — watch the text arrive ──────────────────────
+1. **Dietary high sodium intake**  
+2. **Smoking or tobacco use**  
+3. **Exposure to environmental pollutants**
+→ 30 pieces; first after 70 ms, all done after 442 ms
+▼ await stream.text
+'1. **Dietary high sodium intake**  \n' +
+  '2. **Smoking or tobacco use**  \n' +
+  '3. **Exposure to environmental pollutants**'
+▼ await stream.finishReason
+'stop'
+▼ await stream.usage
+{
+  inputTokens: 28,
+  inputTokenDetails: {},
+  outputTokens: 31,
+  outputTokenDetails: {},
+  totalTokens: 59
+}
+▼ await stream.steps
+[
+  DefaultStepResult {
+    text: '1. **Dietary high sodium intake**  \n' + …,
+    …
+    stepNumber: 0,
+    model: { provider: 'ollama.responses', modelId: 'qwen3:0.6b' },
+    …
+    finishReason: 'stop',
+    usage: { inputTokens: 28, … outputTokens: 31, … totalTokens: 59 },
+    performance: {
+      stepTimeMs: 432.73,
+      toolExecutionMs: {},
+      responseTimeMs: 430.6,
+      effectiveOutputTokensPerSecond: 71.99,
+      outputTokensPerSecond: 84.26,
+      inputTokensPerSecond: 446.66,
+      effectiveTotalTokensPerSecond: 137.02,
+      timeToFirstOutputMs: 62.69,
+      timeBetweenOutputChunksMs: { min: 4.67, p10: 8.21, median: 10.77, avg: 12.27, p90: 19.81, max: 24.11 }
+    },
+    …
+  }
+]
+
+── [C] fullStream — the typed parts behind a stream ────────────
+▼ part types and how many of each
+{
+  start: 1,
+  'start-step': 1,
+  'text-start': 1,
+  'text-delta': 30,
+  'text-end': 1,
+  'finish-step': 1,
+  finish: 1
+}
+▼ first 5 parts
+[
+  { type: 'start' },
+  { type: 'start-step', request: {}, warnings: [] },
+  { type: 'text-start', id: 'G9VHSr1LRznt6E5I' },
+  { type: 'text-delta', id: 'G9VHSr1LRznt6E5I', text: 'Yes' },
+  { type: 'text-delta', id: 'G9VHSr1LRznt6E5I', text: ',' }
+]
+▼ last 3 parts
+[
+  { type: 'text-end', id: 'G9VHSr1LRznt6E5I' },
+  {
+    type: 'finish-step',
+    finishReason: 'stop',
+    rawFinishReason: 'stop',
+    usage: { inputTokens: 27, … outputTokens: 31, … totalTokens: 58 },
+    performance: { stepTimeMs: 369.44, … timeToFirstOutputMs: 51.88, … },
+    providerMetadata: { ollama: { responseId: null } },
+    response: { id: 'aitxt-FBB2I3vErrnodBvqFptcaYbk', timestamp: 2026-10-24T15:17:40.759Z, modelId: 'qwen3:0.6b', … }
+  },
+  {
+    type: 'finish',
+    finishReason: 'stop',
+    rawFinishReason: 'stop',
+    totalUsage: { inputTokens: 27, … outputTokens: 31, … totalTokens: 58 }
+  }
+]
+```
+
+Your answers, ids, timestamps, token counts, timings and the number of `text-delta` parts will all differ: they depend on your model and machine. A bigger model is slower per token but usually gives better answers.
 
 ## Common gotchas
 

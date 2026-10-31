@@ -14,7 +14,7 @@
  */
 import { generateText, registerTelemetry, type LanguageModel } from 'ai';
 import { OpenTelemetry } from '@ai-sdk/otel';
-import { chatModel, env, optional, section } from '@learn/shared';
+import { chatModel, dump, env, optional, section } from '@learn/shared';
 import { setupTracing } from '../01-traces-and-spans/tracing.ts';
 import { fakeModel } from '../support/mock.ts';
 
@@ -40,8 +40,13 @@ const models: [string, LanguageModel][] = offline
   : [env.chatModel, env.fallbackModel].filter((id): id is string => !!id).map((id) => [id, chatModel(id)]);
 
 section(`Sending ${questions.length} questions to ${models.map(([n]) => n).join(' and ')}`);
-for (const [, model] of models)
-  for (const q of questions) await generateText({ model, prompt: q, maxOutputTokens: 400, instructions: 'Answer in at most two sentences.' });
+for (const [name, model] of models)
+  for (const q of questions) {
+    const r = await generateText({ model, prompt: q, maxOutputTokens: 400, instructions: 'Answer in at most two sentences.' });
+    // The usage of the FIRST call per model. Notice `usage` here is the same numbers the span records
+    // below; cost is computed from inputTokens and outputTokens only.
+    if (q === questions[0]) dump(`generateText() usage — ${name}`, { text: r.text, finishReason: r.finishReason, usage: r.usage, totalUsage: r.totalUsage });
+  }
 
 // 2. Read the numbers back from the spans, like a tracing backend would.
 //    The AI SDK's top-level span per call carries model, total tokens and duration.
@@ -58,6 +63,12 @@ const rows = tracing.memory!.getFinishedSpans()
       costUsd: (input * PRICE_IN + output * PRICE_OUT) / 1e6, // 3. cost per request
     };
   });
+
+// One top-level span's attributes, then the row we built from it: everything the cost and latency
+// numbers come from. Notice gen_ai.usage.* on the span, and ms / costUsd that we computed ourselves.
+const firstSpan = tracing.memory!.getFinishedSpans().find((s) => s.attributes['gen_ai.operation.name'] === 'invoke_agent')!;
+dump('first invoke_agent span: attributes', firstSpan.attributes);
+dump('cost record (rows[0])', rows[0]);
 
 section('Per request');
 for (const r of rows) console.log(`${r.model.padEnd(14)} ${r.ms.toFixed(0).padStart(6)} ms  in=${String(r.input).padStart(4)} out=${String(r.output).padStart(4)}  $${r.costUsd.toFixed(6)}`);

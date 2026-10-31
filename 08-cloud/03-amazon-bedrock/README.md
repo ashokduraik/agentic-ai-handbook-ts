@@ -51,6 +51,12 @@ const bedrock = createAmazonBedrock({
 
 The output shows the region-specific URL, the model id, the `/converse` API (Bedrock's common chat format across vendors), and an `AWS4-HMAC-SHA256` signature header.
 
+```ts
+dump('request body (Converse API)', r.body);
+```
+
+[`dump`](../../shared/README.md#dumplabel-value--print-the-full-returned-value) then prints the whole JSON body that would go to Bedrock.
+
 ### Step 3 — a credential provider
 
 ```ts
@@ -65,6 +71,18 @@ const viaRole = createAmazonBedrock({
 ```
 
 Temporary credentials come with a **session token**, which you can see in the `x-amz-security-token` header.
+
+### Step 4 — a real call, only on Bedrock
+
+```ts
+  const result = await generateText({ model: chatModel(), prompt: 'In one sentence: what is triage?', maxOutputTokens: 200 });
+```
+
+```ts
+  console.log('response.modelId:', result.response.modelId, '  steps[0].model.provider:', result.steps[0]!.model.provider);
+```
+
+The same `chatModel()` as everywhere else, and a result with the same fields as on Ollama, so we don't dump it ([all the fields](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned)). We log only the Bedrock-specific parts.
 
 ---
 
@@ -91,12 +109,33 @@ EMBED_MODEL=<Bedrock embedding model id>
 
 ### What you should see
 
+Real output of part A (the date and `x-amz-date` change with the clock):
+
 ```
-[A1] url: 'https://bedrock-runtime.eu-central-1.amazonaws.com/model/eu.example-vendor.example-model-v1%3A0/converse'
-     authorization: 'AWS4-HMAC-SHA256 Credential=AKIAEXAMPLEEXAMPLE00/20261024/eu-central-1/bedrock/aws4_request'
-[A2] authorization: 'AWS4-HMAC-SHA256 Credential=ASIATEMPORARYEXAMPLE/…'   x-amz-security-token: 'fake-session…'
-[B] skipped: AI_PROVIDER is "ollama". …
+── [A1] Static keys → a SigV4-signed request ───────────────────
+{
+  url: 'https://bedrock-runtime.eu-central-1.amazonaws.com/model/eu.example-vendor.example-model-v1%3A0/converse',
+  authorization: 'AWS4-HMAC-SHA256 Credential=AKIAEXAMPLEEXAMPLE00/20261024/eu-central-1/bedrock/aws4_request',
+  'x-amz-date': '20261024T155836Z'
+}
+▼ request body (Converse API)
+{
+  system: [],
+  messages: [
+    { role: 'user', content: [ { text: 'Hello' } ] }
+  ]
+}
+
+── [A2] A credential provider (SSO, profiles, IAM roles) ───────
+{
+  authorization: 'AWS4-HMAC-SHA256 Credential=ASIATEMPORARYEXAMPLE/20261024/eu-central-1/bedrock/aws4_request',
+  'x-amz-security-token': 'fake-session…'
+}
+
+[B] skipped: AI_PROVIDER is "ollama". Set AI_PROVIDER=bedrock, AWS_REGION and credentials in .env to call Bedrock for real.
 ```
+
+In the body, notice there is **no model id**: it's in the URL. `system` is empty because there are no instructions, and each message's `content` is a list of blocks (`{ text }`). Part B prints the `response.modelId` / `steps[0].model.provider` line, then the answer and its usage. *Illustrative, not run:* expect `steps[0].model.provider` to be `amazon-bedrock` (that value was checked offline, on the provider object).
 
 Part A was verified on the box. **Part B (a real Bedrock call) was not tested**: no AWS account was available.
 

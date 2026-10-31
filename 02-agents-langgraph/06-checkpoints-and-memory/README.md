@@ -94,6 +94,22 @@ const { values } = await notes.getState(cfg); // read the latest checkpoint of a
 
 `getState` reads a thread's latest checkpoint without running anything.
 
+The file also prints one whole snapshot with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)), so you can see everything a checkpoint holds:
+
+```ts
+dump('notes.getState(bed4)', await notes.getState(bed4));
+```
+
+| Field | What it is |
+|---|---|
+| `values` | The state itself: here `messages`, both of bed 4's `HumanMessage`s. |
+| `next` | Which node(s) would run next. `[]` means the run finished. (Post 07 shows a paused thread, where this is `['approval']`.) |
+| `tasks` | The tasks waiting to run, with any `interrupts`. Empty here. |
+| `config.configurable` | The `thread_id` **and** the `checkpoint_id` of this exact snapshot. Pass that id back in a config to read or resume from an older checkpoint ("time travel"). |
+| `metadata` | `source` (`'input'` or `'loop'`) and `step`, which counts super-steps on this thread across **all** its runs. |
+| `createdAt` | When the checkpoint was written. |
+| `parentConfig` | The `checkpoint_id` of the snapshot before this one: the checkpoints form a chain, which is what `getStateHistory` walks. |
+
 ### Step 3 — the history
 
 ```ts
@@ -139,6 +155,16 @@ const other = await chatGraph.invoke(note('What is the patient in bed 4 allergic
 
 The same question on two threads. Only thread `t1` has the earlier message in its checkpoint, so only there can the model answer.
 
+```ts
+// We do not dump the whole final state here: post 02 showed a full invoke() state, and the getState()
+// snapshot above showed what a checkpoint holds. We only print the number of messages.
+// Notice: `messages` holds BOTH turns (4 messages: question, answer, question, answer): the
+// checkpointer loaded the first turn before the model ran. The last one is printed above ("same thread").
+console.log('messages in the same-thread state:', same.messages.length);
+```
+
+This shows *how* the model "remembered": the `t1` state holds **four** messages, the first turn's question and answer followed by the second turn's. The checkpointer loaded the first two before the `chat` node ran. The model sees the whole list every time; it has no memory of its own. We saw a full `invoke()` final state in [post 02](../02-state-graphs/README.md#step-4--run-it), and Post 03 has [a table of the message fields](../03-agent-graph/README.md#step-6--stream-node-by-node-updates) (such as `usage_metadata`).
+
 ---
 
 ## Run it
@@ -155,7 +181,74 @@ npm run post:06           # A + B + C (C uses CHAT_MODEL)
 
 - **A**: bed 4 has two notes, bed 7 has one. Then six checkpoints for bed 4, newest first (2, 2, 1, 1, 1, 0 messages).
 - **B**: bed 4 after "restart" has both the 22:00 and the 06:00 note.
-- **C**: `same thread : The patient in bed 4, Rahul Menon, is allergic to penicillin.` and `new thread  :` something like *"Please provide more context…"*. That was the box's 0.6 B model; a larger one answers the same way, more politely.
+- **C**: `same thread : The patient in bed 4, Rahul Menon, is allergic to penicillin.` and `new thread  :` something like *"Please provide more context…"*. That was the box's 0.6 B model; a larger one answers the same way, more politely. Then `messages in the same-thread state: 4`.
+
+A real run with a small `qwen3:0.6b` (trimmed at `…`; message ids, checkpoint ids, times and the model's wording will differ):
+
+```
+── A. MemorySaver — same thread continues, other thread starts empty 
+bed 4: [
+  '08:00 BP 150/95, gave amlodipine.',
+  '12:00 BP 135/85, patient comfortable.'
+]
+bed 7: [ '09:00 Admitted with fever.' ]
+▼ notes.getState(bed4)
+{
+  values: {
+    messages: [
+      HumanMessage {
+        text: '08:00 BP 150/95, gave amlodipine.',
+        contentBlocks: [ { type: 'text', text: '08:00 BP 150/95, gave amlodipine.' } ],
+        id: '0b1374f9-8fbf-4b74-8034-afaafb7f0d28',
+        content: '08:00 BP 150/95, gave amlodipine.',
+        additional_kwargs: {},
+        response_metadata: {},
+        type: 'human'
+      },
+      HumanMessage {
+        text: '12:00 BP 135/85, patient comfortable.',
+        …
+      }
+    ]
+  },
+  next: [],
+  tasks: [],
+  metadata: { source: 'loop', step: 4, parents: {}, thread_id: 'ward-3-bed-4' },
+  config: {
+    configurable: {
+      thread_id: 'ward-3-bed-4',
+      checkpoint_id: '1f1cfbf1-5a62-6830-8004-88585d2354d4',
+      checkpoint_ns: ''
+    }
+  },
+  createdAt: '2026-10-24T15:25:03.411Z',
+  parentConfig: {
+    configurable: {
+      thread_id: 'ward-3-bed-4',
+      checkpoint_ns: '',
+      checkpoint_id: '1f1cfbf1-5a5d-6a10-8003-8b8f7818af80'
+    }
+  }
+}
+  (hidden for readability: values.messages[].lc_* — set SHOW_RAW=1 to print everything)
+  checkpoint 1: 2 message(s), next = []
+  checkpoint 2: 2 message(s), next = [record]
+  checkpoint 3: 1 message(s), next = [__start__]
+  checkpoint 4: 1 message(s), next = []
+  checkpoint 5: 1 message(s), next = [record]
+  checkpoint 6: 0 message(s), next = [__start__]
+
+── B. SqliteSaver — state in a file, read back by a brand-new saver 
+bed 4 after "restart": [
+  '22:00 Night shift: patient asleep, pain 2/10.',
+  '06:00 Morning: asked for breakfast.'
+]
+
+── C. A chat model remembers earlier turns — on the same thread only 
+same thread : The patient in bed 4 is allergic to penicillin.
+new thread  : Please provide more context or details about the patient in bed 4 so I can assist you effectively.   ← it has never heard of bed 4
+messages in the same-thread state: 4
+```
 
 ## Common gotchas
 

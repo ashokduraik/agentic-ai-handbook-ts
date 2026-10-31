@@ -58,6 +58,8 @@ async function runCase(c: AgentCase): Promise<Score> {
   const checks: Record<string, boolean> = {};
   try {
     const r = await agent.ask(c.question);
+    // `r` is the AgentResult (shape: post 06). Each case is graded on `events` (tool + outcome), `blocked` and
+    // the answer text, and the loop at the bottom prints just those: id, checks, tools, answer.
     const answer = r.answer.toLowerCase();
     const okTools = new Set(r.events.filter((e) => e.outcome === 'ok').map((e) => e.tool));
 

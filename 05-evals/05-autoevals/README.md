@@ -67,9 +67,22 @@ Ollama ignores the API key, but the client requires one. For another OpenAI-comp
 ### Treat a judge failure as "no score"
 
 ```ts
-async function score(fn: () => Promise<{ score: number | null }> | { score: number | null }) {
+const dumped = new Set<string>(); // each scorer's full result is dumped once; later results log only the fields that explain the score
+
+async function score(label: string, fn: () => Promise<{ score: number | null }> | { score: number | null }) {
   try {
-    return (await fn()).score;
+    const result = await fn();
+    if (!dumped.has(label)) {
+      dumped.add(label);
+      // The full scorer result, FIRST one per scorer only. Notice `metadata`: Factuality's `choice` (A-E) and `rationale`
+      // explain the score; Faithfulness lists the statements it extracted and its verdicts.
+      dump(`${label} result`, result);
+    } else {
+      const meta = (result as { metadata?: { choice?: string; rationale?: string } }).metadata;
+      console.log(`${label}: score=${result.score}${meta?.choice ? ` choice=${meta.choice}` : ''}`);
+      console.log(`    rationale: ${meta?.rationale ?? '(none)'}`);
+    }
+    return result.score;
   } catch (e) {
     console.log(`    (judge failed: ${(e as Error).message.slice(0, 100)})`);
     return null;
@@ -77,13 +90,23 @@ async function score(fn: () => Promise<{ score: number | null }> | { score: numb
 }
 ```
 
+`dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) prints the **first** result of each scorer in full, since these are the first autoevals shapes you meet. Every later result logs only its `score`, `choice` and `rationale`. An autoevals result has three fields:
+
+| Field | What it tells you |
+|---|---|
+| `name` | Which scorer produced it (`'Factuality'`, `'Faithfulness'`). |
+| `score` | 0 to 1, or `null`. For Factuality it is fixed by `choice`: A (a subset of the reference) = 0.4, B (a superset) = 0.6, C (the same details) = 1, D (a disagreement) = 0, E (differs, but not in a way that matters) = 1. |
+| `metadata` | The *why*. Factuality returns the judge's `rationale` and its `choice` letter. Faithfulness returns the `statements` it extracted from the answer and a `faithfulness` list with a 0/1 `verdict` for each. |
+
+Read the `rationale` next to the `choice`: a judge whose reasoning doesn't match its letter is a judge you can't trust.
+
 ### The two scorers
 
 ```ts
 // 2. Faithfulness: is every statement in the output supported by the context?
-const faithful = await score(() => Faithfulness({ input: icu.question, output, context }));
+const faithful = await score('Faithfulness', () => Faithfulness({ input: icu.question, output, context }));
 // 3. Factuality: does the output agree with the reference answer from the golden dataset?
-const factual = await score(() => Factuality({ input: icu.question, output, expected: icu.reference }));
+const factual = await score('Factuality', () => Factuality({ input: icu.question, output, expected: icu.reference }));
 ```
 
 `icu.reference` comes from the golden dataset (post 02): *"Children under 12 may not visit the ICU unless the charge nurse approves."*
@@ -102,24 +125,37 @@ JUDGE_MODEL=qwen3:1.7b npm run post:05
 
 ### What you should see
 
-With `JUDGE_MODEL=qwen3:1.7b`:
+With `JUDGE_MODEL=qwen3:1.7b` (the rationales are worded differently on every run):
 
 ```
 judge: ollama:qwen3:1.7b via http://localhost:11434/v1
 
 ── faithful: "No. Children under 12 may not visit the ICU unless the charge nurse approves [1]." ──
     (judge failed: No tool call returned)
+▼ Factuality result
+{
+  name: 'Factuality',
+  score: 1,
+  metadata: {
+    rationale: "The submitted answer exactly matches the expert answer's content, including the phrase 'Children under 12 may not visit the ICU unless the charge nurse approves.' The additional '[1]' in the submission is likely a formatting or reference marker, but the factual content remains identical. Thus, the submitted answer is a subset of the expert answer's details.",
+    choice: 'C'
+  }
+}
 { faithful: null, factual: 1 }
 
 ── flipped: "Yes, children under 12 can visit the ICU, provided they are approved by the charge nurse [1]." ──
     (judge failed: No tool call returned)
+Factuality: score=0.4 choice=A
+    rationale: The submitted answer affirms that children under 12 can visit the ICU with charge nurse approval, aligning with the expert's general rule that approval is required. The expert's statement is a conditional prohibition (without approval, they cannot visit), while the submission is a specific case of that rule (with approval, they can). Thus, the submitted answer is a subset of the expert's statement.
 { faithful: null, factual: 0.4 }
 ```
 
-- **Factuality** separates them: 1 for the correct answer, 0.4 for the flipped one. (A strong judge would call the flip a *disagreement*, 0; 0.4 means "subset". Lower, but not as low as it should be.)
+Only Factuality has a result to show: a scorer that throws never returns one, so there is nothing to print. That is why every Faithfulness score is `null`.
+
+- **Factuality** separates them: 1 for the correct answer, 0.4 for the flipped one. (A strong judge would call the flip a *disagreement*, D = 0; 0.4 means "subset". Lower, but not as low as it should be.) The `rationale` shows the mistake: the judge read "may not visit unless approved" and "can visit if approved" as the same rule. It also explains choice C with the word "subset", which is choice A's description.
 - **Faithfulness** failed both times: the small model didn't return the tool call that autoevals' RAGAS-style prompt needs. Correctly recorded as `null`, not as a pass.
 
-With `qwen3:0.6b`, Faithfulness also failed, and Factuality gave **0.4 to both** answers: no signal at all. Each judge call is slow on a CPU (minutes for this file with 1.7B), which is another reason CI runs `evals:fast` without judges.
+With `qwen3:0.6b`, Faithfulness also failed, and Factuality gave **0.4 to both** answers: no signal at all. In four runs with `qwen3:0.6b`, Factuality also failed ("No tool calls in response") about half the time, and when it did answer, it chose A for the flipped answer with the rationale *"The submitted answer is a subset of the expert answer and is fully consistent with it"*. Each judge call is slow on a CPU (minutes for this file with 1.7B), which is another reason CI runs `evals:fast` without judges.
 
 ## Common gotchas
 

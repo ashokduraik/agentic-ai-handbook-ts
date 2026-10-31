@@ -69,6 +69,12 @@ console.log('tooMuch →', r.success ? 'valid' : 'invalid\n' + z.prettifyError(r
 
 `safeParse` never throws; it returns `{ success, data | error }`. `z.prettifyError` turns the error into readable text.
 
+```ts
+if (!r.success) for (const i of r.error.issues) console.log(`  issue: code=${i.code} path=${i.path.join('.')}`);
+```
+
+The full `safeParse` result (`success: false` and a `ZodError` with an `issues` list) is shown in [lesson 01, post 07](../../01-foundations-structured-output/07-structured-output/README.md), so we only log each issue's `code` (`'custom'` for a `.refine()`) and `path` (the field to blame: the `path: ['doseMg']` we gave the rule). The `message` is the text we gave the rule. On success you would get `success: true` and `data` instead.
+
 ### Step 3 — the repair loop
 
 ```ts
@@ -87,21 +93,33 @@ async function extractWithRepair(text: string, maxAttempts = 3) {
         instructions: `Today is ${today}. Extract the prescription. Use ISO dates.`,
         prompt: `Prescription: "${text}"${feedback}`,
       });
+      // The parsed structured output of this attempt (the shape is in lesson 01, post 07). It already
+      // matches the SHAPE (layer 1, checked by the SDK); whether it is SAFE is decided on the next line.
+      console.log(`  attempt ${attempt}: model answered`, JSON.stringify(output));
       const checked = SafePrescription.safeParse(output); // layer 2 is enforced by us
       if (checked.success) return { ok: true as const, value: checked.data, attempts: attempt };
 ```
 
-The SDK enforces the shape (it throws `NoObjectGeneratedError` if the model's JSON doesn't fit). We then check the business rules ourselves. Note that we tell the model today's date: models don't know it.
+The SDK enforces the shape (it throws `NoObjectGeneratedError` if the model's JSON doesn't fit). The log line shows each attempt's `output`, already a typed object of the right shape (more about `Output.object` in [lesson 01, post 07](../../01-foundations-structured-output/07-structured-output/README.md)). We then check the business rules ourselves. Note that we tell the model today's date: models don't know it.
 
 ```ts
       feedback = `\n\nYour previous answer ${JSON.stringify(output)} broke these rules:\n${z.prettifyError(checked.error)}\nFix it if the text allows; never invent a safer dose.`;
     } catch (e) {
       if (!NoObjectGeneratedError.isInstance(e)) throw e; // network/auth errors are not ours to repair
+      // Why the SDK gave up (the full error is in lesson 01, post 07). `text` is what the model actually
+      // wrote: that is what we quote back to the model.
+      console.log(`  attempt ${attempt}: NoObjectGeneratedError, model wrote`, e.text);
       feedback = `\n\nYour previous answer ${e.text ?? ''} was not valid JSON for the schema. Return only valid JSON.`;
     }
 ```
 
-Two kinds of failure, two kinds of feedback. Any **other** error (network down, wrong API key) is re-thrown: asking the model again won't fix those. That is posts 04–06.
+Two kinds of failure, two kinds of feedback. When the shape is wrong, the SDK throws `NoObjectGeneratedError` (its full shape, with `cause`, `usage` and `finishReason`, is in [lesson 01, post 07](../../01-foundations-structured-output/07-structured-output/README.md)). Here we only log `e.text`, the model's raw reply, because that is what we quote back. In our runs the model always produced the right shape, so a scripted mock model that wrote `"doseMg":"2000 mg"` and no `startDate` would log (the text is the `text` field of the error captured from such a mock run):
+
+```
+  attempt 1: NoObjectGeneratedError, model wrote {"drug":"Paracetamol","doseMg":"2000 mg","timesPerDay":4}
+```
+
+A failed attempt still costs tokens: it carries `usage`. Any **other** error (network down, wrong API key) is re-thrown: asking the model again won't fix those. That is posts 04–06.
 
 ### Step 4 — fail closed
 
@@ -110,7 +128,11 @@ Two kinds of failure, two kinds of feedback. Any **other** error (network down, 
   return { ok: false as const, reason: 'could not produce a valid, safe prescription — send to a pharmacist', attempts: maxAttempts };
 ```
 
-The return type is a **union**: `{ ok: true, value }` or `{ ok: false, reason }`. TypeScript forces the caller to check `ok` before touching `value`, so nobody can forget the failure branch.
+```ts
+dump('extractWithRepair() result', await extractWithRepair('Amoxicillin 500 mg three times a day starting 2026-10-25'));
+```
+
+The example `dump()`s ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) this helper's return value, once for a success and once for a failure: it is our own type, not an SDK one. The return type is a **union**: `{ ok: true, value }` or `{ ok: false, reason }`. TypeScript forces the caller to check `ok` before touching `value`, so nobody can forget the failure branch.
 
 ---
 
@@ -128,7 +150,46 @@ npm run post:02           # part A + B (calls your CHAT_MODEL)
 
 - **Part A**: `ok → valid`, then `tooMuch → invalid` with the message *paracetamol total daily dose must not exceed 4000 mg*.
 - **Part B1**: `ok: true`. With the small test model the `drug` field was the whole phrase ("Amoxicillin 500 mg three times a day") instead of just "Amoxicillin". It passed, because our schema only says "at least 2 characters". That is a hint to tighten it (see Try it yourself).
-- **Part B2**: three failed attempts, then `ok: false … send to a pharmacist`. With the small model, "from tomorrow" also became today's date, which broke the date rule as well. Either way, nothing unsafe got out.
+- **Part B2**: three failed attempts, then `ok: false … send to a pharmacist`. With the small model, "from tomorrow" also became a wrong date (today's date in one run, a date two days in the past in another), which broke the date rule as well. Either way, nothing unsafe got out.
+
+Part A and B with `qwen3:0.6b` (dates and the model's choices differ between runs):
+
+```
+── [A] Shape + business rules, no model ──
+ok      → valid
+tooMuch → invalid
+✖ paracetamol total daily dose must not exceed 4000 mg
+  → at doseMg
+  issue: code=custom path=doseMg
+
+── [B1] A normal prescription ──
+  attempt 1: model answered {"drug":"Amoxicillin 500 mg three times a day","doseMg":500,"timesPerDay":3,"startDate":"2026-10-25"}
+▼ extractWithRepair() result
+{
+  ok: true,
+  value: {
+    drug: 'Amoxicillin 500 mg three times a day',
+    doseMg: 500,
+    timesPerDay: 3,
+    startDate: '2026-10-25'
+  },
+  attempts: 1
+}
+
+── [B2] An unsafe prescription → repair attempts, then fail closed ──
+  attempt 1: model answered {"drug":"Paracetamol","doseMg":2000,"timesPerDay":4,"startDate":"2026-10-22"}
+  attempt 1 failed → asking again with feedback:   Your previous answer {"drug":"Paracetamol","doseMg":2000,"timesPerDay":4,"startDate":"2026-10-22"} broke these rules: ✖ paracetamol total …
+  attempt 2: model answered {"drug":"Paracetamol","doseMg":2000,"timesPerDay":4,"startDate":"2026-10-22"}
+…
+▼ extractWithRepair() result
+{
+  ok: false,
+  reason: 'could not produce a valid, safe prescription — send to a pharmacist',
+  attempts: 3
+}
+```
+
+The "model answered" lines show the repair loop's real limit: all three attempts are **identical**. The feedback reached the model, and at `temperature: 0` it gave the same answer again. That is the right outcome here (the text really says 2000 mg four times a day, and we told it never to invent a safer dose), but it also shows that repair only helps when the model *can* fix its answer. The `ok: false` result has no `value` field at all, so there is nothing unsafe to pass on by mistake.
 
 ## Common gotchas
 

@@ -60,6 +60,12 @@ type Alias = 'smart' | 'fast';
 
 `response.modelId` tells you which real model answered: log it (lesson 07), so traces show the model, not just the alias.
 
+```ts
+  console.log(`alias "${alias}" → response.modelId=${response.modelId}  steps[0].model.modelId=${result.steps[0]!.model.modelId}`);
+```
+
+We log just the model ids from the result (the full result, with [all its fields](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned), is in lesson 01, post 00). Nowhere in them does the word "fast" or "smart" appear: the alias is gone, and only the real model is recorded.
+
 ---
 
 ## Run it
@@ -74,13 +80,24 @@ npm run post:04           # SMART_MODEL / FAST_MODEL, else CHAT_MODEL / FALLBACK
 
 ### What you should see
 
+Live on the box, trimmed with "…". Answers differ between runs:
+
 ```
-[A] Aliases → models   smart=qwen3:0.6b   fast=qwen2.5:0.5b
-fast  → { modelId: 'qwen2.5:0.5b', text: 'The pharmacy is open 24/7.' }
-smart → { modelId: 'qwen3:0.6b', text: 'A patient on blood thinners should avoid an extraction to prevent blood loss…' }
+── [A] Aliases → models   smart=qwen3:0.6b   fast=qwen2.5:0.5b ─
+
+── [B] App code asks for aliases ───────────────────────────────
+alias "fast" → response.modelId=qwen2.5:0.5b  steps[0].model.modelId=qwen2.5:0.5b
+fast  → { modelId: 'qwen2.5:0.5b', text: 'The pharmacy opens at 8:00 am.' }
+alias "smart" → response.modelId=qwen3:0.6b  steps[0].model.modelId=qwen3:0.6b
+smart → {
+  modelId: 'qwen3:0.6b',
+  text: 'A patient on blood thinners should avoid a dental extraction to prevent excessive bleeding and complications, which could affect their ability to take blood-thinning medications properly.'
+}
 ```
 
-Note the "fast" answer on the box: **"open 24/7" is made up**. The model had no pharmacy hours to go on. Aliases organise *which* model runs; they don't make answers grounded. That's RAG (lesson 04) and guards (lesson 06).
+The two ids on each `alias` line name the real model; that's what your logs and traces should record.
+
+Note the "fast" answers on the box: **made up**. One run said "open 24/7", this one "opens at 8:00 am". The model had no pharmacy hours to go on. The "smart" answer is wrong too: the patient should *tell* the dentist, not avoid the extraction. The model had no pharmacy hours to go on. Aliases organise *which* model runs; they don't make answers grounded. That's RAG (lesson 04) and guards (lesson 06).
 
 ## Common gotchas
 

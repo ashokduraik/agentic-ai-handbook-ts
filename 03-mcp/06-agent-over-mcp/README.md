@@ -89,6 +89,22 @@ for (const r of step.toolResults) console.log(`        → ${JSON.stringify(r.ou
 
 Print the trail so you can see what the model did.
 
+The file also uses the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) once, for the one shape that is new here:
+
+```ts
+dump('mcp.toolsFromDefinitions() result', tools, { depth: 3 });
+```
+
+```ts
+console.log('toolResults:', result.toolResults.map((r) => ({ toolName: r.toolName, dynamic: r.dynamic, isError: (r.output as { isError?: boolean }).isError })));
+console.log('totalUsage.inputTokens:', result.totalUsage.inputTokens, '| totalUsage.outputTokens:', result.totalUsage.outputTokens);
+```
+
+- **`mcp.listTools()`**: the same `{ tools: [...] }` JSON as the raw client (full shape in [lesson 03 post 01](../01-what-is-mcp/README.md)), including `annotations`, the field we filter on. We don't dump it again.
+- **`toolsFromDefinitions()`**: an object keyed by tool name. Each entry is an AI SDK tool of `type: 'dynamic'` (its types are only known at runtime), with the JSON Schema wrapped as `inputSchema.jsonSchema`, `metadata.annotations` copied over, and an `execute` function (`dump` skips functions) that sends `tools/call` to the server. `cancel_appointment` isn't there: the model can't call what it was never given.
+- **`toolCalls` / `toolResults`**: we saw the full tool-calling shapes in [lesson 01 post 08](../../01-foundations-structured-output/08-tool-calling/README.md). The MCP twist is that each result is `dynamic` and its `output` is the **raw MCP result**, `{ content: [...], isError? }` (see [post 02](../02-tools/README.md)). A failed call shows up as `isError: true`, not as an exception, which is why we log just that.
+- **`totalUsage`**: tokens over all steps. The tool definitions are sent with **every** step, so a few tools already cost hundreds of input tokens.
+
 ```ts
 await mcp.close(); // also terminates the server child process
 ```
@@ -123,6 +139,44 @@ step 1: book_appointment({"patientId":"P-001","slotId":"S-1","reason":"chest pai
 
 Answer: Booked A-101 (slot S-1) for P-001.
 ```
+
+Before the agent run, the dump of `toolsFromDefinitions()` (`--offline` prints it too). After it, the step trail and two targeted logs. A real run with `qwen3:0.6b` (trimmed at `…`; ids and tokens will differ):
+
+```
+▼ mcp.toolsFromDefinitions() result
+{
+  find_patient: {
+    description: 'Find patients by (partial) name. Returns ids needed by other tools.',
+    title: 'Find patient',
+    metadata: {
+      clientName: 'ai-sdk-mcp-client',
+      toolName: 'find_patient',
+      title: 'Find patient',
+      annotations: { readOnlyHint: true }
+    },
+    inputSchema: {
+      jsonSchema: {
+        type: 'object',
+        properties: [Object],
+        '$schema': 'http://json-schema.org/draft-07/schema#',
+        required: [Array(1)],
+        additionalProperties: false
+      }
+    },
+    type: 'dynamic'
+  },
+  …
+}
+
+── Agent run (ollama:qwen3:0.6b) ───────────────────────────────
+step 0: book_appointment({"patientId":"fatima","slotId":null,"reason":"chest pain follow-up"})
+        → {"content":[{"type":"text","text":"MCP error -32602: Input validation error: Invalid arguments for tool book_appointment: Invalid input: expected string, receiv
+…
+toolResults: [ { toolName: 'book_appointment', dynamic: true, isError: true } ]
+totalUsage.inputTokens: 743 | totalUsage.outputTokens: 89
+```
+
+(`[Object]` and `[Array(1)]` are where this dump stops at `depth: 3`.)
 
 With `qwen3:1.7b` the run above worked. With the tiny `qwen3:0.6b` the model skipped the lookups and called `book_appointment({"patientId":"fatima","slotId":null,…})`. The server's schema rejected it (`expected string, received null`), so **nothing wrong was booked**: validation on the server is your safety net when the model ignores the instructions. Use a larger `CHAT_MODEL` for agent work.
 

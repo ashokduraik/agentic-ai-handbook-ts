@@ -12,7 +12,7 @@
  */
 import { generateText, stepCountIs, tool, type LanguageModel } from 'ai';
 import { z } from 'zod';
-import { chatModel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, section, stripThinking } from '@learn/shared';
 import { scriptedModel } from '../support/mock-models.ts';
 
 const executed: string[] = []; // proof of which calls really reached our code
@@ -46,6 +46,11 @@ async function run(model: LanguageModel, prompt: string) {
       if (part.type === 'tool-error') console.log('  ❌ tool-error  ', JSON.stringify(part.input), '→', String(part.error).split('\n')[0]!.slice(0, 90));
       if (part.type === 'tool-result') console.log('  ✅ tool-result ', JSON.stringify(part.input), '→', JSON.stringify(part.output));
     }
+  // Every tool part, in full. Notice a rejected call shows up twice: as a `tool-call` with
+  // `invalid: true` and the validation `error` (its innermost `cause.issues` name the bad fields),
+  // then as a `tool-error` whose `error` is that text. It never reached execute(); the SDK sent the
+  // error text back to the model, which is why it could fix its arguments in the next step.
+  dump('tool parts from every step', result.steps.flatMap((s) => s.content.filter((p) => p.type.startsWith('tool-'))));
   console.log('  model said:', stripThinking(result.text).slice(0, 160));
   console.log('  execute() really ran for:', executed.length ? executed.join(', ') : 'nothing');
 }

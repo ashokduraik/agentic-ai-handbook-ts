@@ -96,6 +96,16 @@ const { candidates, top } = await retrieve(store, question); // hybrid top 6 →
 const a = await answer(question, top); // grounded, cited, may refuse
 ```
 
+We already saw the full shapes these return, so the CLI prints only the fields that matter here. `top` is the 3 hits that become sources `[1]`–`[3]` (hit shape: [post 04](../04-vector-store-sqlite/README.md), [post 05](../05-hybrid-search/README.md) and [post 06](../06-reranking/README.md)); the `after rerank` lines show each one's `score`, which tells you which reranker ran: still the RRF score (≈0.03) with `RERANKER=none`, the judge's 0–10 with `RERANKER=llm`. For the answer we print the fields on top of [post 07](../07-grounded-answers-citations/README.md)'s result:
+
+```ts
+console.log('invalidCitations:', a.invalidCitations, '| contexts[0].text:', a.contexts[0]?.text);
+```
+
+`invalidCitations` lists citation numbers that point at no source, and `contexts` keeps the same three hits so you can show sources next to the answer.
+
+`npm run search` logs just the question's embedding cost (`embed: usage.tokens = …`: a query costs a handful of tokens; the full `embed()` result is in [lesson 01 post 06](../../01-foundations-structured-output/06-embeddings/README.md)) and prints the vector, keyword and hybrid rankings.
+
 ### And so do later lessons
 
 ```ts
@@ -140,6 +150,18 @@ Yes, children under 12 can visit the ICU, provided they are approved by the char
 ```
 
 Retrieval is right, the citation is valid… and the answer is subtly **wrong**. The policy says children under 12 may **not** visit unless approved; *"Yes, children under 12 can visit"* flips the default. The `qwen3:1.7b` answer to the same question even contradicted itself: *"Children under 12 may visit the ICU only if approved… Additionally, children under 12 may not visit the ICU unless approved."*
+
+The extra line from a later run of the same command (trimmed at `…`; the answer wording changes from run to run):
+
+```
+Yes, children under 12 may visit the ICU unless approved by the charge nurse. …
+{ answerable: true, citations: [ 1, 2 ], citationsValid: true }
+invalidCitations: [] | contexts[0].text: ICU visiting is limited to immediate family, 11:00–12:00 and 18:00–19:00. Visitors must perform hand hygiene and wear a gown. Children under 12 may not visit the ICU unless approved by the charge nurse.
+```
+
+With that line you can put `answer` and `contexts[0].text` side by side: the source says "may **not** visit … unless approved", the answer starts "Yes, … may visit … unless approved". It also cites `[2]` (Pediatric ward), which says nothing about the ICU.
+
+The `score=` lines also show what the LLM reranker can do. With the default `RERANKER=llm` and the default no-show question, one `qwen3:0.6b` run gave **10/10** to "How to cancel", "Chronic medication" and "Telehealth fees", and dropped "Late cancellations and no-shows" (the only section with the answer, ranked first by hybrid search) out of the top 3. The model then answered *"24 hours"*, with a valid citation.
 
 No check in this lesson catches that. The citation points at the right source; the claim just doesn't follow from it. Catching this is called **faithfulness evaluation**, and it is the first thing lesson 05 builds.
 

@@ -21,7 +21,7 @@ import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage }
 import { tool } from '@langchain/core/tools';
 import { ChatOllama } from '@langchain/ollama';
 import { z } from 'zod';
-import { env, section, stripThinking } from '@learn/shared';
+import { dump, env, section, stripThinking } from '@learn/shared';
 
 // ---------------------------------------------------------------------------
 // Two tools: one safe (read-only), one risky (changes data)
@@ -149,6 +149,9 @@ if (cmd === 'start') {
   section('start: the agent proposes a risky action');
   const result = await graph.invoke({ messages: [new HumanMessage('Patient P-001 asked to cancel their radiology appointment. Please do it.')] }, config);
   const pending = (result as { __interrupt__?: { value: unknown }[] }).__interrupt__; // set when the graph paused
+  // The full value invoke() returned while paused. Notice the extra `__interrupt__` field: a list of
+  // { id, value }, where `value` is exactly what the approval node passed to interrupt().
+  dump('graph.invoke() result (paused)', result);
   if (pending?.length) {
     console.log('⏸  Paused for approval:', JSON.stringify(pending[0]!.value, null, 2));
     console.log('State saved in data/checkpoints.db. This process now exits. Next: ... resume --approve | --reject');
@@ -159,6 +162,9 @@ if (cmd === 'start') {
   section('resume: a NEW process continues from the checkpoint');
   const snapshot = await graph.getState(config);
   console.log('Waiting at node(s):', snapshot.next);
+  // The snapshot this NEW process loaded from SQLite. Notice: `next` is ['approval'], and `tasks`
+  // lists the paused task with its `interrupts` — the same question the start run printed.
+  dump('graph.getState() snapshot', snapshot);
   if (snapshot.next.length === 0) {
     console.log('Nothing is waiting for approval on this thread. Run `start` first.');
     process.exit(0);
@@ -166,4 +172,9 @@ if (cmd === 'start') {
   const approved = process.argv.includes('--approve');
   const result = await graph.invoke(new Command({ resume: { approved, reviewer: 'dr.ashok' } }), config);
   console.log(approved ? '✅ approved' : '⛔ rejected', '→ final:', stripThinking(String(result.messages.at(-1)?.content)));
+  // We do not dump the whole final state again: the paused invoke() above showed that shape, and the
+  // line above already prints the final reply. We only print the last ToolMessage: it has the same
+  // `tool_call_id` as the cancel call, and says what the tool did on approve or "REJECTED by dr.ashok" on reject.
+  const toolMessages = result.messages.filter((m: BaseMessage) => ToolMessage.isInstance(m));
+  console.log('last tool message:', String(toolMessages.at(-1)?.content));
 }

@@ -155,6 +155,12 @@ if (pending?.length) {
 
 When the graph paused, `invoke` returns normally with `__interrupt__`. In a real app you would store this in a review queue and show it in a UI. Then the process simply ends.
 
+```ts
+dump('graph.invoke() result (paused)', result);
+```
+
+The whole value `invoke` returned, printed with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)). It is the state so far (`messages`: the request, the `list_appointments` call and its result, and the `cancel_appointment` call) **plus** one extra key, `__interrupt__`: a list of `{ id, value }`, where `value` is exactly the object the approval node passed to `interrupt()`. Read the `args` there before approving: that's the whole point of this post (see the real run below).
+
 ### Step 7 — `resume`: a new process continues
 
 ```ts
@@ -165,11 +171,27 @@ console.log('Waiting at node(s):', snapshot.next);
 A brand-new process loads the thread and sees it waiting at `approval`.
 
 ```ts
+dump('graph.getState() snapshot', snapshot);
+```
+
+The same snapshot shape as in [post 06](../06-checkpoints-and-memory/README.md#step-2--two-threads-one-memorysaver), but for a **paused** thread: `next` is `['approval']`, and `tasks` holds the paused task with its `interrupts`, the same question the start run printed. This process never saw that question; it read it from SQLite.
+
+```ts
 const approved = process.argv.includes('--approve');
 const result = await graph.invoke(new Command({ resume: { approved, reviewer: 'dr.ashok' } }), config);
 ```
 
 `Command({ resume })` is the answer to the interrupt. The run continues to the end.
+
+```ts
+// We do not dump the whole final state again: the paused invoke() above showed that shape, and the
+// line above already prints the final reply. We only print the last ToolMessage: it has the same
+// `tool_call_id` as the cancel call, and says what the tool did on approve or "REJECTED by dr.ashok" on reject.
+const toolMessages = result.messages.filter((m: BaseMessage) => ToolMessage.isInstance(m));
+console.log('last tool message:', String(toolMessages.at(-1)?.content));
+```
+
+The final state holds the messages from **both** processes (the shape is the one we saw in the paused `invoke` above, so we do not dump it again). After the `cancel_appointment` call comes a `ToolMessage` with the same `tool_call_id`: what the tool did on approve, or `REJECTED by dr.ashok` on reject. That is the line we print.
 
 ---
 
@@ -193,8 +215,91 @@ npm run post:07:offline
 - **start**: `⏸  Paused for approval:` and a JSON payload with `cancel_appointment` and `{"appointmentId": "A-101"}`.
 - **resume --approve**: `Waiting at node(s): [ 'approval' ]`, then `✅ approved → final:` *"Appointment A-101 has been cancelled…"*.
 - **resume --reject**: `⛔ rejected → final:` a reply saying the cancellation was rejected.
+- Around those lines, the dumped state: the paused result with its `__interrupt__` and the loaded snapshot. After resuming, only the last tool message is printed (`last tool message: …`), not the whole final state.
 
 With a very small model (tested with 0.6 B and 1.7 B), **start** sometimes ends with `Finished without needing approval:` and an empty reply or *"Please provide the appointment ID"*. The model failed to call the tools at all. Run it again or use a larger `CHAT_MODEL`. Notice the safety property even then: **nothing was cancelled without approval**.
+
+A real run with a small `qwen3:0.6b` (trimmed at `…`; ids, timestamps and tokens will differ, and so may the model's choices):
+
+```
+── start: the agent proposes a risky action ────────────────────
+▼ graph.invoke() result (paused)
+{
+  messages: [
+    HumanMessage { text: 'Patient P-001 asked to cancel their radiology appointment. Please do it.', … },
+    AIMessage { … tool_calls: [ { name: 'list_appointments', args: { patientId: 'P-001' }, … } ], … },
+    ToolMessage { … name: 'list_appointments', … },
+    AIMessage {
+      …
+      tool_calls: [
+        {
+          name: 'cancel_appointment',
+          args: { appointmentId: 'A-100' },
+          id: 'c3089051-d1d5-4cdc-8fcc-f99940de92ee',
+          type: 'tool_call'
+        }
+      ],
+      …
+    }
+  ],
+  __interrupt__: [
+    {
+      id: 'f8746d0e19f765eafa0cbc50b084735b',
+      value: {
+        question: 'Approve these actions?',
+        actions: [
+          {
+            name: 'cancel_appointment',
+            args: { appointmentId: 'A-100' },
+            id: 'c3089051-d1d5-4cdc-8fcc-f99940de92ee',
+            type: 'tool_call'
+          }
+        ]
+      }
+    }
+  ]
+}
+  (hidden for readability: messages[].lc_* — set SHOW_RAW=1 to print everything)
+⏸  Paused for approval: {
+…
+
+── resume: a NEW process continues from the checkpoint ─────────
+Waiting at node(s): [ 'approval' ]
+▼ graph.getState() snapshot
+{
+  values: { messages: [ … the same four messages … ] },
+  next: [ 'approval' ],
+  tasks: [
+    {
+      id: '539fd38e-1495-5c14-a3f6-eaf99af67a92',
+      name: 'approval',
+      path: [ '__pregel_pull', 'approval' ],
+      interrupts: [
+        {
+          id: 'f8746d0e19f765eafa0cbc50b084735b',
+          value: {
+            question: 'Approve these actions?',
+            actions: [
+              {
+                name: 'cancel_appointment',
+                args: { appointmentId: 'A-100' },
+                …
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  metadata: { source: 'loop', step: 3, parents: {}, thread_id: 'ticket-4711' },
+  …
+}
+…
+✅ approved → final: The cancellation of appointment A-100 was successful.
+last tool message: Appointment A-100 cancelled.
+```
+
+**Look at the `args`.** The patient asked to cancel **radiology**, which is `A-101`. In every live run on the box, this small model picked `A-100`, the **cardiology** appointment, and an approving human would have cancelled the wrong one. The dumped `__interrupt__` value is what a reviewer sees, and this is exactly the mistake the approval step exists to catch: here the right answer was `--reject`. (A possible nudge: the tool description's example id is `like A-100`.) The scripted `--offline` model asks for `A-101`, and a rejected run ends with a `ToolMessage` `REJECTED by dr.ashok` (tool_call_id `t2`) and the reply `Done. Last tool said: REJECTED by dr.ashok`.
 
 ## Common gotchas
 

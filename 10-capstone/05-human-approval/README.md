@@ -50,6 +50,22 @@ export function writeToolsOf(tools: { name: string; annotations?: { readOnlyHint
     const booked = await raw.list_appointments!.execute!({ patientId: 'P-001' }, { toolCallId: 'check', messages: [], context: {} });
 ```
 
+### Step 5 — look at the approval decision
+
+The full `generateText()` result was dumped in [lesson 01, post 00](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned) (tool calls in [post 08](../../01-foundations-structured-output/08-tool-calling/README.md)), so this demo does not dump it again. It dumps only the one new part: the `tool-approval-response` in `content`, in run [A]. Everything else is a summary line: each call, each approval decision, the answer text and the store. `dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)).
+
+```ts
+    // The full generateText() result shape is in lesson 01, posts 00 and 08; tool-approval-response was dumped in
+    // lesson 06, post 08. Only that part is dumped here, and only in [A]: Notice approved: false and your `reason`,
+    // and that the booking never produced a tool-result. [B]'s approved booking is shown by the summary lines and the store below.
+    if (!approveWrites) dump('generateText() result: the tool-approval-response part of content', r.content.find((p) => p.type === 'tool-approval-response'));
+```
+
+```ts
+    // The store's truth, whatever the answer text claimed (the result is a normal MCP tool result: post 02).
+    console.log('  store:   ', (booked as { content: { text: string }[] }).content[0]!.text);
+```
+
 ---
 
 ## Run it
@@ -64,10 +80,29 @@ npm run post:05           # your CHAT_MODEL decides
 
 ### What you should see
 
-Offline:
+Offline (`approvalId` is a new random id each run):
 
 ```
-[A] Without approval · scripted model
+── [A] Without approval · scripted model ──
+▼ generateText() result: the tool-approval-response part of content
+{
+  type: 'tool-approval-response',
+  approvalId: 'aitxt-a5b1vIyOxdr48zWfT4azProy',
+  toolCall: {
+    type: 'tool-call',
+    toolCallId: 'call-2',
+    toolName: 'book_appointment',
+    input: { patientId: 'P-001', slotId: 'S-1', reason: 'BP follow-up' },
+    toolMetadata: {
+      clientName: 'ai-sdk-mcp-client',
+      toolName: 'book_appointment',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
+    },
+    dynamic: true
+  },
+  approved: false,
+  reason: 'needs human approval'
+}
   call      search_patients
   call      find_slots
   call      book_appointment
@@ -75,16 +110,48 @@ Offline:
   answer:   Done.
   store:    []
 
-[B] With approval · scripted model
-  …
+── [B] With approval · scripted model ──
+  call      search_patients
+  call      find_slots
+  call      book_appointment
   approval  book_appointment: approved
   answer:   Done.
-  store:    [{"resourceType":"Appointment","id":"APT-1","status":"booked",…}]
+  store:    [{"resourceType":"Appointment","id":"APT-1","status":"booked","slot":[{"reference":"Slot/S-1"}],"participant":[{"actor":{"reference":"Patient/P-001"},"status":"accepted"}],"description":"BP follow-up","start":"2026-10-25T09:00:00+03:00"}]
 ```
+
+What to notice:
+
+| Field | What it tells you |
+|---|---|
+| `approved` / `reason` | The answer your `toolApproval` policy gave: `approved: false` with your `reason` in [A]. In [A] there is no `tool-result` for the booking: the server was never called. |
+| `toolCall.toolMetadata.annotations` | The MCP annotations travel with every call; `readOnlyHint: false` is why the booking needed approval. |
+| `approvalId` | A new random id each run. |
+| `approval  book_appointment: …` | The summary line for every run: denied in [A], approved in [B]. |
+| `store:` | The store's answer: `[]` in [A], the Appointment in [B]. |
 
 The scripted model says "Done." both times. Only the store tells you which run really booked.
 
-Live on the box (`qwen3:0.6b`), the small model skipped `search_patients` and `find_slots` and called `book_appointment` straight away. In run A it was denied, and the answer said approval was needed (correct). In run B it was approved, but the call failed (no real ids), and the answer said the booking **"is already confirmed"** while the store was empty: exactly the false claim this post warns about.
+Live (`qwen3.8:latest`), the model called `search_patients`, `find_slots`, then `book_appointment` in both runs. Run A was denied (the part dumped has `approved: false`), and the answer said human approval was needed. Run B was approved and booked (answers trimmed to the first 160 characters, as the code does):
+
+```
+── [A] Without approval · ollama:qwen3.8:latest ──
+  call      search_patients
+  call      find_slots
+  call      book_appointment
+  approval  book_appointment: denied (needs human approval)
+  answer:   The booking requires human approval, so please review and approve it to confirm Fatima Al-Harbi's earliest cardiology slot (S-1, 2026-10-25 09:00 with Dr. Salem
+  store:    []
+
+── [B] With approval · ollama:qwen3.8:latest ──
+  call      search_patients
+  call      find_slots
+  call      book_appointment
+  approval  book_appointment: approved
+  answer:   Fatima Al-Harbi (P-001) is booked for the earliest cardiology slot on 2026-10-25 at 09:00 (+03:00) with Dr. Salem for a blood-pressure follow-up (APT-1).
+  store:    [{"resourceType":"Appointment","id":"APT-1","status":"booked","slot":[{"reference":"Slot/S-1"}],"participant":[{"actor":{"reference":"Patient/P-001"},"status":"accepted"}],"description":"blood-pressure follow-up","start":"2026-10-25T09:00:00+03:00"}]
+```
+
+Small models behave differently. In an earlier run on `qwen3:0.6b`, the model skipped `search_patients` and `find_slots` and called `book_appointment` straight away, in both runs. Approval was given in run B, but the model passed a name (`'FATIMA AL-HARBI'`) as `patientId` and `null` as `slotId`, so the host refused the call with `FORBIDDEN: FATIMA AL-HARBI is not in your care team`. The answer still said the appointment "has been booked", while the store was `[]`: exactly the false claim this post warns about.
 
 ## Common gotchas
 

@@ -16,7 +16,7 @@ import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage }
 import { tool } from '@langchain/core/tools';
 import { ChatOllama } from '@langchain/ollama';
 import { z } from 'zod';
-import { env, section, stripThinking } from '@learn/shared';
+import { dump, env, section, stripThinking } from '@learn/shared';
 
 // ---------------------------------------------------------------------------
 // The tool (LangChain style: function + name/description/schema)
@@ -109,11 +109,21 @@ const stream = await graph.stream(
   { messages: [new HumanMessage('When is patient P-001 seeing radiology?')] },
   { streamMode: 'updates' },
 );
+let firstUpdate = true; // only the first event is dumped in full (the others are one-line summaries)
 for await (const update of stream) {
+  if (firstUpdate) {
+    // The raw event, shown in full ONCE. Notice its shape: { <node name>: <the partial update that node returned> }.
+    // The agent node returns an AIMessage (look at `tool_calls`, and `usage_metadata` when live).
+    // The later events have the same shape, so below we print one short line per message instead.
+    dump('first stream update', update);
+    firstUpdate = false;
+  }
   for (const [node, delta] of Object.entries(update)) {
     for (const m of (delta as { messages?: BaseMessage[] }).messages ?? []) {
       const calls = AIMessage.isInstance(m) && m.tool_calls?.length ? ` → asks for ${JSON.stringify(m.tool_calls.map((c) => [c.name, c.args]))}` : '';
-      console.log(`[${node}] ${m.getType()}: ${stripThinking(String(m.content)).slice(0, 200)}${calls}`);
+      // The tools node returns ToolMessages; `tool_call_id` points at the model's call they answer.
+      const answers = ToolMessage.isInstance(m) ? ` (answers ${m.tool_call_id})` : '';
+      console.log(`[${node}] ${m.getType()}: ${stripThinking(String(m.content)).slice(0, 200)}${calls}${answers}`);
     }
   }
 }

@@ -79,6 +79,18 @@ const governed = (model: ModelObject) =>
 
 Putting a log on each side of `defaultSettingsMiddleware` shows exactly what it changed.
 
+### Step 4 — the result, and what the model received
+
+```ts
+  console.log(`  result: steps[0].model.modelId=${r.steps[0]!.model.modelId}`);
+```
+
+```ts
+  dump('first call the model received', base.doGenerateCalls[0]);
+```
+
+We don't dump each call's full result ([all the fields](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned)); the log shows the base model's id. The defaults don't show in the result at all: it reports what came back, not what was sent. To see what the model actually received, the offline run [`dump`](../../shared/README.md#dumplabel-value--print-the-full-returned-value)s the fake model's first recorded call.
+
 ---
 
 ## Run it
@@ -93,17 +105,50 @@ npm run post:05
 
 ### What you should see
 
+Live on the box, trimmed with "…". Times and answers differ between runs:
+
 ```
-A call that sets nothing: the defaults fill in
+── [A+B] A call that sets nothing: the defaults fill in ────────
   outer  sees temperature=undefined maxOutputTokens=undefined
   inner  sees temperature=0 maxOutputTokens=512
-  timer  qwen3:0.6b took 275 ms
-A call that sets its own limit: the call wins over the default
+  timer  qwen3:0.6b took 358 ms
+  result: steps[0].model.modelId=qwen3:0.6b
+  → To make your first appointment as comfortable and effective as possible, bring a thoughtful and personalized experience 
+
+── [A+B] A call that sets its own limit: the call wins over the default 
   outer  sees temperature=undefined maxOutputTokens=200
   inner  sees temperature=0 maxOutputTokens=200
+  timer  qwen3:0.6b took 190 ms
+  result: steps[0].model.modelId=qwen3:0.6b
+  → Hello! How can I help you today?
 ```
 
-Offline adds a self-check: `✅ defaults applied, and the per-call value won`.
+`steps[0].model.modelId` is the base model's id: wrapping doesn't change the provider or id. Offline adds what the model received, then a self-check:
+
+```
+▼ first call the model received
+{
+  temperature: 0,
+  maxOutputTokens: 512,
+  toolChoice: { type: 'auto' },
+  prompt: [
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: 'What should I bring to my first appointment? One sentence.'
+        }
+      ]
+    }
+  ],
+  headers: [hidden headers: 1 keys]
+}
+  (hidden for readability: headers — set SHOW_RAW=1 to print everything)
+✅ defaults applied, and the per-call value won
+```
+
+`temperature: 0` and `maxOutputTokens: 512` came from `defaultSettingsMiddleware`; the app set neither. `prompt` is the provider-level form of the message list the app's plain string turned into.
 
 ## Common gotchas
 

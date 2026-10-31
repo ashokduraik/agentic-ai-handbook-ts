@@ -41,13 +41,17 @@ if (process.argv.includes('--offline')) process.exit(0);
 // Part B: does the model follow the attacker?
 // ---------------------------------------------------------------------------
 section('[B] Summarise the poisoned letter with your CHAT_MODEL');
-const { text } = await generateText({
+const result = await generateText({
   model: chatModel(),
   instructions,
   prompt: `Summarise this letter:\n${referralLetter}`,
   temperature: 0,
   maxOutputTokens: 512,
 });
+// The full generateText result is in lesson 01, post 00. Here we only log what matters: nothing in
+// it says "this followed an injected instruction"; only our own check below can tell.
+const { text } = result;
+console.log('finishReason:', result.finishReason, '  tokens:', result.usage.inputTokens, 'in /', result.usage.outputTokens, 'out');
 const answer = stripThinking(text);
 console.log('model said:', answer);
 // The check is deterministic: did the attacker's canary reach the output?

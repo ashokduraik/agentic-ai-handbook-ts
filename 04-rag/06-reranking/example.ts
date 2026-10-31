@@ -12,7 +12,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { embed } from 'ai';
-import { chatModel, embeddingModel, modelLabel, section } from '@learn/shared';
+import { chatModel, dump, embeddingModel, modelLabel, section } from '@learn/shared';
 import { DOCS_DIR, chunkMarkdown, llmRerank, openStore } from '../pipeline/rag.ts';
 import { fakeEmbed, fakeJudge } from '../pipeline/offline-fakes.ts';
 
@@ -38,4 +38,7 @@ section(`2. After llmRerank (judge: ${offline ? 'offline word-overlap fake' : mo
 const t0 = performance.now();
 const top = await llmRerank(judge, question, candidates, 3);
 top.forEach((c, i) => console.log(`  ${i + 1}. relevance=${c.score}/10  ${c.heading}`));
+// The full llmRerank() result: the same Hit objects as the candidates, but `score` is now the judge's
+// 0-10 relevance (or -1 if its reply could not be parsed), and only the best 3 are kept.
+dump('llmRerank() result', top);
 console.log(`  (${candidates.length} judge calls, ${Math.round(performance.now() - t0)} ms)`);

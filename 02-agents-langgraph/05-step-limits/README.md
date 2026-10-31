@@ -91,6 +91,12 @@ console.log('Reply to user: "Sorry, I could not finish this request. A staff mem
 
 The user gets an honest message; you get a log line.
 
+```ts
+dump('GraphRecursionError', { name: e.name, code: (e as { lc_error_code?: string }).lc_error_code, message: e.message });
+```
+
+This prints the error's useful fields with `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)). `message` says which limit tripped and links to LangGraph's troubleshooting page. `code` (LangGraph calls it `lc_error_code`) is `'GRAPH_RECURSION_LIMIT'`: a fixed value, so match on **that** in log searches and alerts rather than on the message text, which can change between versions.
+
 ---
 
 ## Run it
@@ -111,6 +117,14 @@ npm run post:05
 
 ⛔ Stopped after 3 model calls: GraphRecursionError
 Reply to user: "Sorry, I could not finish this request. A staff member will follow up."
+▼ GraphRecursionError
+{
+  name: 'GraphRecursionError',
+  code: 'GRAPH_RECURSION_LIMIT',
+  message: 'Recursion limit of 6 reached without hitting a stop condition. You can increase the limit by setting the "recursionLimit" config key.\n' +
+    '\n' +
+    'Troubleshooting URL: https://docs.langchain.com/oss/javascript/langgraph/GRAPH_RECURSION_LIMIT/\n'
+}
 ```
 
 Three model calls for a limit of 6, because each `tools` run counts too.

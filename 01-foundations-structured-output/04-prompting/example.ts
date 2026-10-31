@@ -13,7 +13,7 @@
  *       npx tsx 04-prompting/example.ts --offline  (only prints the good prompt's messages)
  */
 import { generateText, type ModelMessage } from 'ai';
-import { chatModel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, section, stripThinking } from '@learn/shared';
 
 // The real inputs we want sorted, with the label a nurse would give them.
 const inbox = [
@@ -61,6 +61,11 @@ const shown = good(inbox[0]!.text);
 const asSent: ModelMessage[] = [{ role: 'system', content: shown.instructions }, ...shown.messages]; // what the model receives
 for (const m of asSent) console.log(`${m.role.padEnd(9)}| ${String(m.content).replace(/\n/g, '\n         | ')}`);
 
+// The raw value good() returns — the exact options object spread into generateText().
+// Notice: `instructions` is a plain string, and `messages` holds ONLY user/assistant turns
+// (the few-shot pairs, then the real input). No 'system' message in the array.
+dump('good(inbox[0].text) — the options we pass to generateText', shown);
+
 if (process.argv.includes('--offline')) process.exit(0);
 
 // ---------------------------------------------------------------------------
@@ -76,4 +81,13 @@ for (const item of inbox) {
   console.log(`  vague → ${await run(vague(item.text))}`);
   console.log(`  good  → ${await run(good(item.text))}`);
 }
+
+// One more call for the good prompt on the first message, to look at two fields of the result.
+// (We do not dump the whole generateText() result again: post 00 already showed it in full.)
+// `text` is a single word, and `usage.inputTokens` is much larger than for a one-line prompt:
+// the system prompt and the few-shot examples are re-sent (and paid for) on every call.
+const full = await generateText({ model: chatModel(), ...good(inbox[0]!.text), temperature: 0, maxOutputTokens: 400 });
+console.log('\nGood prompt, first message — text:', full.text);
+console.log('usage:', { inputTokens: full.usage.inputTokens, outputTokens: full.usage.outputTokens });
+
 console.log('\nLook for: the good prompt gives ONE word your code can check; the vague one gives free text you would have to interpret.');

@@ -69,10 +69,13 @@ Everything the SDK does inside this callback becomes a child of `handle-request`
         //    With real patient data also pass recordInputs: false, recordOutputs: false.
         telemetry: { functionId: 'wait-time-bot' },
       });
+      // The full generateText result is in lesson 01, post 00 (with tools: post 08). Here we log just what
+      // maps to spans: each step becomes its own AI SDK span, and `totalUsage` is what the top span records.
+      console.log(`steps=${r.steps.length} stepFinishReasons=${r.steps.map((s) => s.finishReason).join(',')} totalUsage in/out=${r.totalUsage.inputTokens}/${r.totalUsage.outputTokens}`);
       span.setAttribute('app.steps', r.steps.length);
 ```
 
-Nothing else changes in your code. After the call you can add results to your own span, like the number of steps.
+Nothing else changes in your code. After the call you can add results to your own span, like the number of steps. We log a few result fields first, so you can match them to spans. The full result with all its fields is in [lesson 01, post 00](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned), and a result with tool calls is in [lesson 01, post 08](../../01-foundations-structured-output/08-tool-calling/README.md).
 
 ### Step 4 — check the tree (offline)
 
@@ -81,6 +84,12 @@ Nothing else changes in your code. After the call you can add results to your ow
   const hasUsage = children.some((s) => typeof s.attributes['gen_ai.usage.input_tokens'] === 'number');
   if (!children.length || !hasTool || !hasUsage) throw new Error('expected nested AI SDK spans with tool + usage attributes');
 ```
+
+```ts
+  dump('AI SDK span attributes', spans.filter((s) => s !== root).map((s) => ({ name: s.name, attributes: s.attributes })));
+```
+
+Offline, the spans are in memory, so the example also dumps (see [`dump`](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) every attribute the AI SDK wrote: much more than the console exporter's one-line summary. Live, use `TRACE_EXPORTER=console-raw` to see the same.
 
 With the `memory` exporter you can **test** your instrumentation like any other code. This check runs in `npm run test:offline`, so a dependency upgrade that breaks tracing fails the build.
 
@@ -98,6 +107,66 @@ npm run post:03           # your CHAT_MODEL, spans printed to the console
 
 ### What you should see
 
+- **Live, the result** (box: `qwen3:0.6b`; ids and token counts differ between runs):
+
+```
+steps=2 stepFinishReasons=tool-calls,stop totalUsage in/out=364/34
+```
+
+  Each part has a span: `steps[0]` is `step 1` with its `chat` span (161 in / 21 out, `finish_reasons=["tool-calls"]`), its tool call is `execute_tool getWaitTime`, `steps[1]` is `step 2`, and `totalUsage` (364 / 34) is on `invoke_agent`.
+- **Offline, the span attributes** (scripted model; trimmed):
+
+```
+▼ AI SDK span attributes
+[
+  {
+    name: 'chat scripted',
+    attributes: {
+      'gen_ai.operation.name': 'chat',
+      'gen_ai.provider.name': 'mock',
+      'gen_ai.request.model': 'scripted',
+      'gen_ai.request.max_tokens': 512,
+      'gen_ai.system_instructions': '[{"type":"text","content":"Answer using the getWaitTime tool. One sentence."}]',
+      'gen_ai.input.messages': '[{"role":"user","parts":[{"type":"text","content":"How long is the wait in the emergency department?"}]}]',
+      'gen_ai.tool.definitions': '[{"type":"function","name":"getWaitTime", …}]',
+      'gen_ai.client.operation.duration': 0.0005655780000000163,
+      'gen_ai.response.finish_reasons': [ 'tool-calls' ],
+      …
+      'gen_ai.usage.input_tokens': 42,
+      'gen_ai.usage.output_tokens': 7,
+      'gen_ai.output.messages': '[{"role":"assistant","parts":[{"type":"tool_call","id":"call-0","name":"getWaitTime","arguments":{"department":"emergency"}}],"finish_reason":"tool_call"}]'
+    }
+  },
+  {
+    name: 'execute_tool getWaitTime',
+    attributes: {
+      'gen_ai.operation.name': 'execute_tool',
+      'gen_ai.tool.name': 'getWaitTime',
+      'gen_ai.tool.call.id': 'call-0',
+      'gen_ai.tool.type': 'function',
+      'gen_ai.tool.call.arguments': '{"department":"emergency"}',
+      'gen_ai.execute_tool.duration': 0.00008855799999997771,
+      'gen_ai.tool.call.result': '{"department":"emergency","minutes":45}'
+    }
+  },
+  { name: 'step 1', attributes: { 'gen_ai.operation.name': 'agent_step' } },
+  …
+  {
+    name: 'invoke_agent scripted',
+    attributes: {
+      'gen_ai.operation.name': 'invoke_agent',
+      …
+      'gen_ai.agent.name': 'wait-time-bot',
+      …
+      'gen_ai.usage.input_tokens': 84,
+      'gen_ai.usage.output_tokens': 14,
+      …
+    }
+  }
+]
+```
+
+  Notice `gen_ai.agent.name`: that's the `functionId`. The prompt, instructions, tool definitions, tool arguments and results, and the answer are all recorded by default (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.tool.call.*`). With patient data, turn that off with `recordInputs: false, recordOutputs: false`. The durations are in seconds.
 - **Offline**: the indented tree from the diagram above (`handle-request → invoke_agent → step 1 → chat, execute_tool → step 2 → chat`) and `✅ 6 AI SDK spans nested under handle-request`.
 - **Live** (box: `qwen3:0.6b`): seven `[span]` lines, children first. Two `chat qwen3:0.6b` spans (the first with `finish_reasons=["tool-calls"]`), `execute_tool getWaitTime`, two `step` spans, `invoke_agent` with the total tokens (364 in / 34 out on the box), and finally `handle-request … app.steps=2`. The answer: "The wait in the emergency department is 45 minutes."
 

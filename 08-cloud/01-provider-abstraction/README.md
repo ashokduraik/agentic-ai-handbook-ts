@@ -62,10 +62,22 @@ A "dry run" like this is the first thing to run after changing `.env` on a serve
 ```
 
 ```ts
-const { embedding } = await embed({ model: embeddingModel(), value: 'appointment cancellation policy' });
+const embedded = await embed({ model: embeddingModel(), value: 'appointment cancellation policy' });
 ```
 
 Nothing here mentions Ollama, Azure or AWS.
+
+### Step 4 — see what changes with the provider
+
+```ts
+console.log('response.modelId:', result.response.modelId, '  steps[0].model.provider:', result.steps[0]!.model.provider);
+```
+
+```ts
+console.log(`dimensions=${embedding.length} (changes per provider → re-index your vector store when you switch!)`);
+```
+
+This post is about providers, not about what these calls return, so we don't print the full results: they are in [lesson 01, post 00](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned) (`generateText`), [post 07](../../01-foundations-structured-output/07-structured-output/README.md) (structured output) and [post 06](../../01-foundations-structured-output/06-embeddings/README.md) (`embed`). Switch providers and run again: the shape stays the same. Only `response.modelId`, `steps[0].model.provider` and `providerMetadata` change, and the vector size.
 
 ---
 
@@ -81,14 +93,38 @@ npm run post:01           # + a structured call and an embedding
 
 ### What you should see
 
+Live on the box, trimmed with "…". The answer, ids and numbers differ between runs:
+
 ```
-{ provider: 'ollama', chat: 'ollama:qwen3:0.6b', embed: 'ollama:qwen3-embedding:0.6b' }
+{
+  provider: 'ollama',
+  chat: 'ollama:qwen3:0.6b',
+  embed: 'ollama:qwen3-embedding:0.6b'
+}
   OLLAMA_BASE_URL          http://localhost:11434
-{ department: 'general', urgent: false } { inputTokens: 39, outputTokens: 13, … }
+
+── [B] Structured output through whichever provider is active ──
+response.modelId: qwen3:0.6b   steps[0].model.provider: ollama.responses
+{ department: 'general', urgent: false } {
+  inputTokens: 39,
+  …
+  outputTokens: 13,
+  …
+  totalTokens: 52
+}
+
+── [B] Embeddings through the same abstraction ─────────────────
 dimensions=1024 (changes per provider → re-index your vector store when you switch!)
 ```
 
-Yes: on the box, the tiny `qwen3:0.6b` said **crushing chest pain** is *general* and *not urgent*. The schema was valid; the judgement was wrong. Portability doesn't make a model good enough. Your evals decide that.
+| Field | What it means |
+| --- | --- |
+| `output` | The object parsed and checked against the schema (the first of the two values printed after the model line). |
+| `response.modelId` | The model that answered. |
+| `steps[0].model.provider` | Which provider adapter ran: `ollama.responses` here; Azure or Bedrock on those providers. |
+| `dimensions` | 1024 numbers for `qwen3-embedding:0.6b`. Another embedding model gives a different size. |
+
+Yes: on the box (in this run and earlier ones), the tiny `qwen3:0.6b` said **crushing chest pain** is *general* and *not urgent*. The schema was valid; the judgement was wrong. Portability doesn't make a model good enough. Your evals decide that.
 
 ## Common gotchas
 

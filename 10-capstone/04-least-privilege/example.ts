@@ -4,7 +4,7 @@
  *
  *   npm run post:04      (no model needed)
  */
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 import { connectFhirServer } from '../02-the-mcp-server/connect.ts';
 import { ROLE_TOOLS, wrapTool, type Role, type Session } from './access.ts';
 
@@ -29,15 +29,25 @@ try {
   const summary = wrapTool(raw.get_patient_summary!, s);
 
   section('[B] A patient outside the care team: stopped by the host');
-  console.log(' ', textOf(await summary.execute!({ patientId: 'P-002' }, call)));
+  const stopped = await summary.execute!({ patientId: 'P-002' }, call);
+  // The result the model would get: same shape as a server result (content parts, isError), so the model
+  // reads the refusal like any other tool answer. Just `isError` and the text; the shape is in post 02.
+  console.log(`  isError=${(stopped as { isError?: boolean }).isError}  ${textOf(stopped)}`);
 
   section('[C] A patient in the care team: raw result vs what the model gets');
-  console.log('  raw:    ', textOf(await raw.get_patient_summary!.execute!({ patientId: 'P-001' }, call)));
-  console.log('  wrapped:', textOf(await summary.execute!({ patientId: 'P-001' }, call)));
+  const rawResult = await raw.get_patient_summary!.execute!({ patientId: 'P-001' }, call);
+  const wrapped = await summary.execute!({ patientId: 'P-001' }, call);
+  // The one full comparison in this post, and the first time you see what wrapping does. Notice the wrapped
+  // result has [NATIONAL_ID] and [PHONE] where the raw one has the numbers.
+  dump('raw get_patient_summary result: P-001', rawResult);
+  dump('wrapped get_patient_summary result: P-001', wrapped);
+  console.log('  raw:    ', textOf(rawResult));
+  console.log('  wrapped:', textOf(wrapped));
 
   // 3. Small models often pass a NAME where an id is expected. The check still holds.
   section('[D] A name instead of an id');
-  console.log(' ', textOf(await summary.execute!({ patientId: 'Fatima Al-Harbi' }, call)));
+  const byName = await summary.execute!({ patientId: 'Fatima Al-Harbi' }, call);
+  console.log(`  isError=${(byName as { isError?: boolean }).isError}  ${textOf(byName)}`);
 } finally {
   await mcp.close();
 }

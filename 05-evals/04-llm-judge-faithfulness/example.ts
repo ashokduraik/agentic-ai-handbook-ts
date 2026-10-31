@@ -8,7 +8,7 @@
  * Run: npx tsx 04-llm-judge-faithfulness/example.ts            (JUDGE_MODEL, or CHAT_MODEL if unset)
  *      npx tsx 04-llm-judge-faithfulness/example.ts --offline  (a word-overlap fake judge: watch it fail)
  */
-import { chatModel, modelLabel, optional, section } from '@learn/shared';
+import { chatModel, dump, modelLabel, optional, section } from '@learn/shared';
 import { fakeModel } from '@learn/rag/offline-fakes';
 import { faithfulness } from './faithfulness.ts';
 
@@ -45,6 +45,10 @@ for (const [label, answer] of Object.entries(answers)) {
     const result = await faithfulness(judge, answer, context);
     result.claims.forEach((c) => console.log(`  ${c.supported ? '✅' : '❌'} ${c.claim}`));
     console.log(`  faithfulness = ${result.score.toFixed(2)}`);
+    // The full faithfulness() result: `claims` is what the judge extracted, each with its verdict,
+    // and `score` = supported / all. Notice how the claims are worded: a judge that rephrases a claim
+    // (drops a "not") can make a wrong answer look faithful.
+    dump('faithfulness() result', result);
   } catch (e) {
     console.log(`  judge failed: ${(e as Error).message.slice(0, 120)}  ← judges are models too; record this as "no score", never as a pass`);
   }

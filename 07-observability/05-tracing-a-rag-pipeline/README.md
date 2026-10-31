@@ -48,6 +48,16 @@ await tracer.startActiveSpan('rag.request', async (root) => {
 
 Each stage is a span inside the request span. The AI SDK's embedding spans nest inside `rag.retrieve` automatically.
 
+```ts
+      console.log(`embedMany: ${embeddings.length} vectors of ${embeddings[0]!.length} numbers, usage.tokens=${many.usage.tokens}`);
+```
+
+```ts
+      console.log(`embed: 1 vector of ${one.embedding.length} numbers, usage.tokens=${one.usage.tokens}`);
+```
+
+We log only the vector count and size, and `usage.tokens`: the same number the AI SDK puts on the embedding span. The full `embedMany()` and `embed()` results are in [lesson 01, post 06](../../01-foundations-structured-output/06-embeddings/README.md).
+
 ### Step 2 — retrieval quality on the span
 
 ```ts
@@ -58,7 +68,11 @@ Each stage is a span inside the request span. The AI SDK's embedding spans nest 
       span.setAttributes({ 'app.candidates': docs.length, 'app.top_ids': ranked.map((d) => d.id), 'app.top_score': Number(ranked[0]!.score.toFixed(3)) });
 ```
 
-Rank by cosine similarity, keep the top 2, and record what came back and how confident it looked.
+Rank by cosine similarity, keep the top 2, and record what came back and how confident it looked. Just before `setAttributes`, the example dumps ([`dump`](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) the two hits with their scores:
+
+```ts
+      dump('top 2 hits', ranked);
+```
 
 ### Step 3 — generation, with a citation check
 
@@ -67,6 +81,12 @@ Rank by cosine similarity, keep the top 2, and record what came back and how con
       const valid = cited.length > 0 && cited.every((id) => top.some((d) => d.id === id)); // cited only what we retrieved?
       span.setAttributes({ 'app.citations': cited, 'app.citations_valid': valid });
 ```
+
+```ts
+      console.log(`generateText: inputTokens=${result.usage.inputTokens} outputTokens=${result.usage.outputTokens}`);
+```
+
+We log the usage and don't print the full answer result ([its fields](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned)); the check reads only its `text`.
 
 A cheap, deterministic quality check on every request. In your backend you can then search for `app.citations_valid = false` and read exactly those traces.
 
@@ -84,8 +104,43 @@ npx tsx 05-tracing-a-rag-pipeline/example.ts "Is the pharmacy open on Saturday?"
 
 ### What you should see
 
+Live on the box (`qwen3-embedding:0.6b` + `qwen3:0.6b`), trimmed with "…". Vectors, scores, token counts and the answer differ between runs:
+
+```
+[span]   └─ embeddings qwen3-embedding:0.6b (2532 ms) operation.name="embeddings" provider.name="ollama.embedding" request.model="qwen3-embedding:0.6b" usage.input_tokens=91
+[span]   └─ embeddings qwen3-embedding:0.6b (2533 ms) operation.name="embeddings" provider.name="ollama.embedding" request.model="qwen3-embedding:0.6b"
+embedMany: 4 vectors of 1024 numbers, usage.tokens=91
+…
+embed: 1 vector of 1024 numbers, usage.tokens=9
+…
+▼ top 2 hits
+[
+  {
+    id: 'no-show',
+    text: 'A no-show deposit of 50 SAR is charged when an appointment is missed without 24 hours notice.',
+    score: 0.7615257729156175
+  },
+  {
+    id: 'parking',
+    text: 'Outpatient parking is in building C. The first two hours are free.',
+    score: 0.396615425567917
+  }
+]
+[span]   └─ rag.retrieve (2594 ms) app.candidates=4 app.top_ids=["no-show","parking"] app.top_score=0.762
+…
+generateText: inputTokens=110 outputTokens=28
+[span]   └─ rag.generate (674 ms) app.citations=["no-show"] app.citations_valid=true
+```
+
+| Field | What it means |
+| --- | --- |
+| `embedMany: 4 vectors of 1024 numbers` | One 1024-number vector per document, in the same order as the input texts. |
+| `usage.tokens` | Tokens embedded: 91 for the four docs, 9 for the question. The span shows the same as `usage.input_tokens`. |
+| Two `embeddings` spans per call | The AI SDK writes an outer span for the `embedMany`/`embed` call and an inner one for the model call. Only one of them carries the token count. |
+| `score` | Cosine similarity. The right doc scored 0.76, the next only 0.40: a clear gap. A small gap would be a warning sign worth recording. |
+
 - **Offline**: `rag.retrieve … app.top_ids=["no-show","visiting"]`, `rag.generate … app.citations=["no-show"] app.citations_valid=true`, and the answer *The no-show deposit is 50 SAR [no-show].*
-- **Live** (box: `qwen3-embedding:0.6b` + `qwen3:0.6b`): `rag.retrieve (2254 ms)`, almost all of it the first embedding call while the model loaded; `rag.generate (579 ms)`; citations valid. But the answer said the deposit "is charged" **without saying 50 SAR**: retrieval was right, the citation was right, and the answer was still incomplete. The trace narrows the problem to generation.
+- **Live**: `rag.retrieve` takes over 2 s, almost all of it the first embedding call while the model loads; `rag.generate` well under 1 s; citations valid. In the run above the answer included 50 SAR. In an earlier run, it said the deposit "is charged" **without saying 50 SAR**: retrieval was right, the citation was right, and the answer was still incomplete. The trace narrows a problem like that to generation.
 
 ## Common gotchas
 

@@ -12,7 +12,7 @@
  *       npx tsx 07-cost-ledger/example.ts --offline  (a fake model and example prices)
  */
 import { generateText, wrapLanguageModel, type LanguageModelMiddleware } from 'ai';
-import { chatModel, isMain, optional, section } from '@learn/shared';
+import { chatModel, dump, isMain, optional, section } from '@learn/shared';
 import { fakeModel, type ModelObject } from '../support/fakes.ts';
 
 export interface Prices {
@@ -58,12 +58,15 @@ export function createLedger(pricesFor: (modelId: string) => Prices, { budgetUsd
 if (isMain(import.meta.url)) {
   const offline = process.argv.includes('--offline');
 
-  // 3. Prices are configuration. Offline uses made-up prices that make the budget trip quickly.
-  const prices: Prices = {
-    inPerMTok: Number(optional('PRICE_PER_MTOK_IN', offline ? '2000' : '0')),
-    outPerMTok: Number(optional('PRICE_PER_MTOK_OUT', offline ? '8000' : '0')),
-  };
-  const ledger = createLedger(() => prices, { budgetUsd: Number(optional('BUDGET_USD', offline ? '0.3' : '1')) });
+  // 3. Prices are configuration. Offline ignores .env and uses made-up prices that trip the $0.30
+  // budget after three mock calls (so `test:offline` is stable even when PRICE_* is 0 in .env).
+  const prices: Prices = offline
+    ? { inPerMTok: 2000, outPerMTok: 8000 }
+    : {
+        inPerMTok: Number(optional('PRICE_PER_MTOK_IN', '0')),
+        outPerMTok: Number(optional('PRICE_PER_MTOK_OUT', '0')),
+      };
+  const ledger = createLedger(() => prices, { budgetUsd: offline ? 0.3 : Number(optional('BUDGET_USD', '1')) });
   const model = wrapLanguageModel({
     model: offline ? fakeModel('mock-model') : (chatModel() as ModelObject),
     middleware: ledger.middleware,
@@ -73,14 +76,20 @@ if (isMain(import.meta.url)) {
   const questions = ['When is the lab open?', 'Where do I park?', 'Can I eat before a blood test?', 'How do I get my results?', 'Who do I call after hours?'];
   for (const q of questions) {
     try {
-      await generateText({ model, prompt: q, maxOutputTokens: 200 });
+      const r = await generateText({ model, prompt: q, maxOutputTokens: 200 });
       console.log(`  ✅ ${q.padEnd(32)} spent so far $${ledger.spent().toFixed(4)}`);
+      // The full result is in lesson 01, post 00. We log just `usage.inputTokens` and `usage.outputTokens` of
+      // the first call: the numbers the ledger multiplies by the prices.
+      if (q === questions[0]) console.log(`     first call usage: inputTokens=${r.usage.inputTokens} outputTokens=${r.usage.outputTokens}`);
     } catch (e) {
       console.log(`  ⛔ ${q.padEnd(32)} ${(e as Error).message}`);
+      // The error the budget check threw is a plain Error whose message is printed above: the model was never called.
     }
   }
 
   section('Ledger');
   console.table(Object.fromEntries([...ledger.rows].map(([id, r]) => [id, { ...r, usd: Number(r.usd.toFixed(4)) }])));
+  // The raw ledger record behind the table: one row per model id, `usd` not rounded.
+  dump('ledger.rows', ledger.rows);
   if (offline && ledger.rows.get('mock-model')?.calls !== 3) throw new Error('expected the budget to stop calls after 3');
 }

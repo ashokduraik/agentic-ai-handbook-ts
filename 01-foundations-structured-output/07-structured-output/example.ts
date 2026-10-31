@@ -10,7 +10,7 @@
  */
 import { generateText, NoObjectGeneratedError, Output } from 'ai';
 import { z } from 'zod';
-import { chatModel, section } from '@learn/shared';
+import { chatModel, dump, section } from '@learn/shared';
 
 // ---------------------------------------------------------------------------
 // The schema: the exact shape of a booking request
@@ -38,6 +38,12 @@ console.log('good →', AppointmentRequest.safeParse(good).success ? 'valid' : '
 const r = AppointmentRequest.safeParse(bad);
 console.log('bad  →', r.success ? 'valid' : 'invalid\n' + z.prettifyError(r.error));
 
+// The raw return values of safeParse(). Notice: success → { success: true, data } where `data` is
+// the parsed (typed) object; failure → { success: false, error } where error.issues is a list —
+// one entry per problem, each with a `path` (which field), a `code` and a `message`.
+dump('safeParse(good)', AppointmentRequest.safeParse(good));
+dump('safeParse(bad).error.issues', r.success ? [] : r.error.issues);
+
 if (process.argv.includes('--offline')) process.exit(0);
 
 // ---------------------------------------------------------------------------
@@ -47,18 +53,27 @@ section('[B] Free-text note → typed object from the model');
 const note = 'Called at 9am: Mrs. Fatima Al-Harbi wants to see a heart doctor, chest tightness on the stairs since last week. Prefers 2026-11-03 if possible.';
 console.log('Note:', note);
 try {
-  const { output } = await generateText({
+  const result = await generateText({
     model: chatModel(),
     output: Output.object({ schema: AppointmentRequest }), // "reply with JSON matching this schema"
     instructions: 'Extract a structured appointment request from the note. Do not invent facts.',
     prompt: note,
     temperature: 0,
   });
+  const { output } = result;
   // `output` is typed AppointmentRequest and already validated — no JSON.parse, no casting.
   console.log(JSON.stringify(output, null, 2));
   console.log('Typed access → output.department =', output.department);
+
+  // The full result. Notice the two views of the same answer: `text` is the raw JSON STRING the
+  // model wrote, and `output` is that string parsed and validated against the schema (an object).
+  dump('generateText() result with Output.object', result);
 } catch (error) {
   // The failure path: reply was not valid JSON or did not match the schema.
-  if (NoObjectGeneratedError.isInstance(error)) console.error('Did not match the schema. Raw reply:\n', error.text);
-  else throw error;
+  if (NoObjectGeneratedError.isInstance(error)) {
+    console.error('Did not match the schema. Raw reply:\n', error.text);
+    // What the error carries: the raw text, why the model stopped, the tokens it used, and the
+    // underlying cause (a JSON parse error or the Zod issues).
+    dump('NoObjectGeneratedError', { text: error.text, finishReason: error.finishReason, usage: error.usage, cause: error.cause });
+  } else throw error;
 }

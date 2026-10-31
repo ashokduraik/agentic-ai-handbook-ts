@@ -114,6 +114,24 @@ Because the request span is current, this one becomes its child. No ids passed a
 
 A span can be marked as failed. Backends count and highlight these.
 
+### Step 4b — print the whole span
+
+```ts
+    dump('the finished call-model span', span);
+```
+
+```ts
+    // Same shape as call-model above; notice `status`: code 2 is ERROR (0 = unset, 1 = OK), with our message.
+    const finished = span as unknown as ReadableSpan;
+    console.log('save-summary:', finished.name, finished.status);
+```
+
+```ts
+  dump('request.spanContext()', request.spanContext());
+```
+
+[`dump(label, value)`](../../shared/README.md#dumplabel-value--print-the-full-returned-value) prints the full value. After `span.end()`, the span object is exactly what an exporter receives, so you see every field a backend stores. The `save-summary` span has the same shape, so the example logs only its `name` and ERROR `status`.
+
 ### Step 5 — end and flush
 
 ```ts
@@ -139,13 +157,55 @@ TRACE_EXPORTER=console-raw npm run post:01   # the full span objects, ids and al
 
 ### What you should see
 
+Ids, times and durations differ on every run. Trimmed with "…":
+
 ```
-[span]   └─ load-record (41 ms)
-[span]   └─ call-model (251 ms) app.note="this is where an LLM call will go in post 02"
-[span]   └─ save-summary (20 ms) ❌
-trace id: 2f3183b2c64a75b13f9819add435025b
-[span] summarise-patient (314 ms) app.request_id="req-001" app.patient_ref="P-001"
+[span]   └─ load-record (40 ms) 
+[span]   └─ call-model (250 ms) app.note="this is where an LLM call will go in post 02"
+▼ the finished call-model span
+SpanImpl {
+  duration: [ 0, 249746409 ],
+  ended: true,
+  …
+  kind: 0,
+  parentSpanContext: {
+    traceId: 'e3e1d5c0c49f43410765b84063875f40',
+    spanId: '8459a65987999424',
+    traceFlags: 1
+  },
+  attributes: { 'app.note': 'this is where an LLM call will go in post 02' },
+  links: [],
+  events: [],
+  startTime: [ 1792857230, 236000000 ],
+  resource: ResourceImpl {
+    asyncAttributesPending: false,
+    attributes: { 'service.name': '07-post-01', 'service.version': '1.0.0' }
+  },
+  instrumentationScope: { name: '07-post-01' },
+  name: 'call-model',
+  status: { code: 0 },
+  endTime: [ 1792857230, 485746409 ]
+}
+…
+save-summary: save-summary { code: 2, message: 'disk full' }
+[span]   └─ save-summary (21 ms) ❌ 
+trace id: e3e1d5c0c49f43410765b84063875f40
+▼ request.spanContext()
+{ traceId: 'e3e1d5c0c49f43410765b84063875f40', spanId: '8459a65987999424', traceFlags: 1 }
+[span] summarise-patient (316 ms) app.request_id="req-001" app.patient_ref="P-001"
 ```
+
+| Field | What it means |
+| --- | --- |
+| `startTime`, `endTime` | `[seconds, nanoseconds]` since 1970. |
+| `duration` | `endTime − startTime`, in the same `[seconds, nanoseconds]` form: `[0, 249746409]` is 0.25 s. |
+| `kind` | 0 = INTERNAL (work inside this process). Post 02 uses 2 = CLIENT for a call to a model server. |
+| `parentSpanContext` | The parent's ids. Its `spanId` is the request span's `spanId` from `request.spanContext()`, and its `traceId` is the shared trace id. The root span has no `parentSpanContext`. |
+| `attributes` | The key/value facts set with `setAttribute`. |
+| `events` | Timestamped notes inside a span. Post 02 shows the `exception` event a failure adds. |
+| `resource` | Who produced the span: `service.name` comes from `setupTracing('07-post-01')`. |
+| `status` | `code` 0 = unset, 1 = OK, 2 = ERROR, plus an optional message. |
+| `traceFlags` | 1 = sampled: this span will be exported. |
 
 Children print **before** their parent, because a span is exported when it **ends**, and the parent ends last. With `console-raw`, check that every span has the same `traceId` and that each child's `parentSpanContext.spanId` is the parent's id.
 

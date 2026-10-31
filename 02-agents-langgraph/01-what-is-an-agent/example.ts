@@ -12,7 +12,7 @@
  */
 import { generateText, tool, type JSONValue, type ModelMessage } from 'ai';
 import { z } from 'zod';
-import { chatModel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, section, stripThinking } from '@learn/shared';
 
 // ---------------------------------------------------------------------------
 // The "world" the agent can look at: a tiny appointment book
@@ -59,6 +59,16 @@ for (let step = 1; step <= MAX_STEPS; step++) {
     temperature: 0,
   });
   console.log('finishReason =', result.finishReason); // "tool-calls" or "stop"
+  // The model's decision, in short. We do not dump the raw toolCalls / toolResults objects: lesson 01
+  // post 08 already showed them. Each tool call has a `toolCallId`, a `toolName` and the `input` the
+  // model chose; the "model asked" line below prints the name and input. An empty list means "I'm done".
+  console.log('toolCalls requested:', result.toolCalls.length);
+  // No `execute` on our tool, so the SDK never runs it and `toolResults` stays empty:
+  // running the tool is OUR job (below).
+  console.log('toolResults from the SDK:', result.toolResults.length, '(always 0 here: we run the tool ourselves)');
+  // What we append to the memory: the roles of the messages in `result.response.messages`. It is one
+  // assistant message whose `content` holds the 'tool-call' part(s), or the final 'text' part.
+  console.log('response.messages (roles):', result.response.messages.map((m) => m.role));
   messages.push(...result.response.messages); // remember what the model said (text and/or tool calls)
 
   // DECISION 1: no tool calls → the model is done.
@@ -79,3 +89,8 @@ for (let step = 1; step <= MAX_STEPS; step++) {
   }
   if (step === MAX_STEPS) console.log(`Stopped after ${MAX_STEPS} steps without a final answer.`);
 }
+
+// The agent's whole memory at the end. Notice the pattern: user → assistant (tool-call) → tool
+// (tool-result, same toolCallId) → assistant (text). This array IS the agent's state.
+section('The whole conversation the loop built');
+dump('messages', messages);

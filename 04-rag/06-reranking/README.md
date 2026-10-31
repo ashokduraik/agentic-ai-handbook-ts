@@ -55,6 +55,12 @@ const candidates = store.hybridSearch(question, queryVector, 6);
 const top = await llmRerank(judge, question, candidates, 3);
 ```
 
+```ts
+dump('llmRerank() result', top);
+```
+
+`dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) prints the reranker's full output. It is the **same `Hit` objects** as the candidates (`id`, `source`, `heading`, `text`), with two changes: `score` is now the judge's **0–10 relevance** instead of the RRF score (or `-1` if the judge's reply couldn't be parsed), and only the best 3 are left. Look at the `text` of each kept hit and decide for yourself whether it answers the question: that is the fastest way to see whether your judge is any good.
+
 ### Inside `llmRerank`
 
 ```ts
@@ -136,6 +142,40 @@ Retrieval already did well: the three discharge sections are on top. Then the re
   2. relevance=10/10  Telehealth Consultations (fictional) › Fees
   3. relevance=3/10  Inpatient Discharge Process (fictional) › Discharge summary
 ```
+
+The full reranker output from a third run (0.6B judge, trimmed at `…`; scores change from run to run):
+
+```
+── 2. After llmRerank (judge: ollama:qwen3:0.6b) ───────────────
+  1. relevance=10/10  Inpatient Discharge Process (fictional) › Discharge summary
+  2. relevance=10/10  Telehealth Consultations (fictional) › Fees
+  3. relevance=0/10  Inpatient Discharge Process (fictional) › Discharge time
+▼ llmRerank() result
+[
+  {
+    id: 'discharge.md#1',
+    source: 'discharge.md',
+    heading: 'Inpatient Discharge Process (fictional) › Discharge summary',
+    text: 'Every patient receives a discharge summary listing diagnoses, medication changes and follow-up appointments. The summary is also shared to the patient app within 24 hours.',
+    score: 10
+  },
+  {
+    id: 'telehealth.md#2',
+    source: 'telehealth.md',
+    heading: 'Telehealth Consultations (fictional) › Fees',
+    text: 'Telehealth follow-ups cost the same as in-person follow-ups and are covered by most insurance plans.',
+    score: 10
+  },
+  {
+    id: 'discharge.md#0',
+    …
+    score: 0
+  }
+]
+  (6 judge calls, 1887 ms)
+```
+
+Reading the `text` makes the problem obvious: a passage about telehealth fees got 10/10 for a discharge question, and a hit with relevance **0** still made the top 3 only because there were just 6 candidates.
 
 **Both small judges made the result worse.** The 0.6B judge gave "Pediatric ward" and "Chronic medication" 10/10 but scored "Discharge summary" (the real answer) lower, so the answer dropped out of the top 3. (Results vary between runs; one run kept "Discharge summary" on top but still let "Telehealth fees" in at 10/10.) The 1.7B judge scored the actual answer 3/10. A 0.6–1.7B model is too small to be a reliable judge. With a strong model (or a real rerank model) the right section reliably lands first. This is why the pipeline has `RERANKER=none`, and why lesson 05 measures before you choose.
 

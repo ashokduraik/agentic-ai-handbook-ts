@@ -11,7 +11,7 @@
  */
 import { StateGraph, StateSchema, MessagesValue, GraphRecursionError, START, END, type GraphNode } from '@langchain/langgraph';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 
 const AgentState = new StateSchema({ messages: MessagesValue });
 
@@ -49,6 +49,9 @@ try {
     // Turn the crash into a safe, honest reply (and log it: a loop is a bug worth looking at).
     console.log(`\n⛔ Stopped after ${modelCalls} model calls: ${e.name}`);
     console.log('Reply to user: "Sorry, I could not finish this request. A staff member will follow up."');
+    // The error's fields. Notice: `message` names the limit that tripped, and `code` (LangGraph's
+    // `lc_error_code`) is a stable value to match on in logs and alerts, unlike the message text.
+    dump('GraphRecursionError', { name: e.name, code: (e as { lc_error_code?: string }).lc_error_code, message: e.message });
   } else {
     throw e;
   }

@@ -61,7 +61,8 @@ for (let start = 0; start < policy.length; start += 200) {
 ### 2. Heading-aware: the pipeline's `chunkMarkdown`
 
 ```ts
-for (const c of chunkMarkdown('visiting-hours.md', policy)) {
+const chunks = chunkMarkdown('visiting-hours.md', policy);
+for (const c of chunks) {
 ```
 
 `chunkMarkdown` lives in [`../pipeline/chunk.ts`](../pipeline/chunk.ts). The whole thing is about 20 lines:
@@ -110,6 +111,29 @@ const icu = chunkMarkdown('visiting-hours.md', policy, 160, 40).filter((c) => c.
 
 Our policies are short, so with the default 800 characters no section is split. Here we force tiny windows to see the overlap.
 
+### 4. The full chunks
+
+Both chunk lists are also printed whole with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)):
+
+```ts
+dump('chunkMarkdown() result', chunks);
+```
+
+```ts
+dump('ICU windows (maxChars=160, overlap=40)', icu);
+```
+
+Every `Chunk` has four fields:
+
+| Field | Example | Why it's there |
+|---|---|---|
+| `id` | `'visiting-hours.md#1'` | `file#index`. Stable, so re-ingesting the same file **replaces** rows instead of duplicating them (post 04). |
+| `source` | `'visiting-hours.md'` | The file, for citations (post 07). |
+| `heading` | `'Visiting Hours Policy (…) › Intensive Care Unit (ICU)'` | "Doc title › Section". Embedded together with the text (post 03) and shown as the source label. |
+| `text` | `'ICU visiting is limited to …'` | The section body **without** its heading line. |
+
+In the small-window run both ICU windows keep the **same `heading`**, so each can still be cited as the ICU section, but each gets its own `id`.
+
 ---
 
 ## Run it
@@ -140,6 +164,41 @@ npm run post:02
 ```
 
 Naive chunk `@200` mixes two wards and `@400` starts with "ay not visit". The heading-aware chunks are one section each, with a label.
+
+The dumps (a real run; no model, so yours will match, trimmed at `…`):
+
+```
+▼ chunkMarkdown() result
+[
+  {
+    id: 'visiting-hours.md#0',
+    source: 'visiting-hours.md',
+    heading: 'Visiting Hours Policy (Al Noor General Hospital — fictional) › General wards',
+    text: 'Visiting hours on general wards are 10:00–13:00 and 16:00–21:00 daily. A maximum of two visitors per patient may be at the bedside at one time.'
+  },
+  {
+    id: 'visiting-hours.md#1',
+    …
+  },
+  …
+]
+…
+▼ ICU windows (maxChars=160, overlap=40)
+[
+  {
+    id: 'visiting-hours.md#1',
+    source: 'visiting-hours.md',
+    heading: 'Visiting Hours Policy (Al Noor General Hospital — fictional) › Intensive Care Unit (ICU)',
+    text: 'ICU visiting is limited to immediate family, 11:00–12:00 and 18:00–19:00. Visitors must perform hand hygiene and wear a gown. Children under 12 may not visit th'
+  },
+  {
+    id: 'visiting-hours.md#2',
+    source: 'visiting-hours.md',
+    heading: 'Visiting Hours Policy (Al Noor General Hospital — fictional) › Intensive Care Unit (ICU)',
+    text: 'gown. Children under 12 may not visit the ICU unless approved by the charge nurse.'
+  }
+]
+```
 
 ## Common gotchas
 

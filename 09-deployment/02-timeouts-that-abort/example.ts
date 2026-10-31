@@ -13,7 +13,7 @@
  */
 import type { ServerResponse } from 'node:http';
 import { generateText } from 'ai';
-import { chatModel, isMain, section } from '@learn/shared';
+import { chatModel, dump, isMain, section } from '@learn/shared';
 
 /** 1. Abort when the time is up OR when the client disconnects, whichever comes first. */
 export function requestSignal(res: ServerResponse, timeoutMs: number): AbortSignal {
@@ -68,11 +68,16 @@ if (isMain(import.meta.url)) {
   modelFinishedAt = undefined;
   const start = ms();
   try {
-    await generateText({ model: model(), prompt, abortSignal: AbortSignal.timeout(TIMEOUT_MS), maxRetries: 0 });
+    const result = await generateText({ model: model(), prompt, abortSignal: AbortSignal.timeout(TIMEOUT_MS), maxRetries: 0 });
     console.log(`  finished in ${ms() - start} ms (the model was faster than the timeout)`);
+    // Only when the model beat the timeout. Just the fields this post cares about: the full result shape
+    // is in lesson 01, post 00.
+    dump('generateText() result: text and usage', { text: result.text, usage: result.usage });
   } catch (e) {
     // 2. In a server, a timeout becomes 504 Gateway Timeout; anything else stays a 500.
     console.log(`  ${ms() - start} ms: aborted → would answer ${isTimeout(e) ? 504 : 500}  (${(e as Error).name})`);
+    // The error generateText threw. Notice `name: 'TimeoutError'`: that is what isTimeout() looks for.
+    dump('caught error', e);
   }
   if (offline) {
     await new Promise((r) => setTimeout(r, 2000));

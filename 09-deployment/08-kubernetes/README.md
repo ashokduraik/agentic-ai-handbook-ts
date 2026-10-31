@@ -98,6 +98,18 @@ No cluster? [`example.ts`](./example.ts) runs post 06's app and polls it like th
     // 3. Liveness: N failures means "wedged" → the container is restarted.
 ```
 
+While the backend is down, the demo fetches both probe paths once and dumps just `status` and `json` (the full HTTP response shape is in [post 01](../01-validate-at-the-edge/README.md#step-4--look-at-the-full-response); the probe endpoints are post 04's idea, built into the app in [post 06](../06-the-rag-service/README.md)). `dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)).
+
+```ts
+// What the two probes see right now, as `status` and `json` only (the full HTTP response shape is in lesson 09,
+// post 01). Notice /healthz still answers 200 (the process is fine) while /readyz answers 503 with the
+// reason: that difference is why the pod is not restarted.
+for (const path of ['/healthz', '/readyz']) {
+  const r = await fetch(base + path);
+  dump(`GET ${path}: status and json`, { status: r.status, json: await r.json() });
+}
+```
+
 ---
 
 ## Run it
@@ -121,11 +133,15 @@ t=  8s  readiness ✅ → added to Service endpoints (gets traffic)
 t= 13s  💥 model backend goes down
 t= 26s  readiness ❌×3 → REMOVED from Service endpoints (no traffic, no restart)
 t= 38s  liveness failures so far: 0, restarts: 0
+▼ GET /healthz: status and json
+{ status: 200, json: { ok: true } }
+▼ GET /readyz: status and json
+{ status: 503, json: { ready: false, reason: 'ollama unreachable' } }
 t= 38s  🔧 model backend is back
 t= 41s  readiness ✅ → added to Service endpoints (gets traffic)
 ```
 
-The exact seconds can differ by one, depending on the first probe.
+The exact seconds can differ by one, depending on the first probe. The kubelet only looks at `status` (200–399 is a pass). The `reason` in the `/readyz` JSON is for you: `kubectl describe pod` doesn't show it, but `curl` on the pod does.
 
 **Not tested by the course author:** applying the manifests to a real cluster. CI validates them with `kubeconform` on every push (post 09).
 

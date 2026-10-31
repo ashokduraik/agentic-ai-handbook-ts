@@ -10,7 +10,7 @@
  */
 import { generateText } from 'ai';
 import { getEncoding } from 'js-tiktoken';
-import { chatModel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, section, stripThinking } from '@learn/shared';
 
 const tokenizer = getEncoding('o200k_base');
 const tokens = (s: string) => tokenizer.encode(s).length;
@@ -77,10 +77,24 @@ console.log(`Dump everything:     ≈ ${tokens(everything)} tokens (all ${polici
 console.log(`Engineered context:  ≈ ${tokens(system) + tokens(prompt)} tokens (${relevantPolicies.length} policy, 4 patient fields, ${recentHistory.length} turns)`);
 console.log('\n--- system ---\n' + system + '\n--- user ---\n' + prompt);
 
+// The raw values each step produced. Notice: SELECT kept 1 of 4 policies (the warfarin one);
+// TRIM kept 4 fields and dropped the phone and insurance; COMPRESS kept the last 2 turns.
+section('[A2] The raw output of each step');
+dump('STEP 1 select → relevantPolicies', relevantPolicies);
+dump('STEP 2 trim → the patient fields we kept', { name, age, allergies, medications });
+dump('STEP 3 compress → recentHistory', recentHistory);
+
 if (process.argv.includes('--offline')) process.exit(0);
 
 section('[B] The model’s answer using the engineered context');
-const { text, usage } = await generateText({ model: chatModel(), instructions: system, prompt, temperature: 0, maxOutputTokens: 600 });
+const result = await generateText({ model: chatModel(), instructions: system, prompt, temperature: 0, maxOutputTokens: 600 });
+const { text, usage } = result;
 console.log(stripThinking(text));
 console.log('inputTokens counted by provider:', usage.inputTokens);
 console.log('Look for: it mentions warfarin / bleeding risk — the one fact that matters, which we made sure was in the context.');
+
+// We do NOT dump the whole generateText() result again: post 00 already showed it in full.
+// We only print what matters here. `usage.inputTokens` (logged above) is close to our local estimate
+// for the engineered context (not the "dump everything" number), and `finishReason` should be
+// 'stop' — if it says 'length', raise maxOutputTokens: the answer was cut off.
+console.log('finishReason:', result.finishReason);

@@ -68,6 +68,21 @@ for (const m of medications) console.log(`  ${m.subject.reference.padEnd(14)} ${
 
 Booking marks the slot busy, so the same slot can't be booked twice. Post 05 checks bookings by reading this store, never by trusting what the model says.
 
+### Step 5 — look at what the write returned
+
+The demo dumps the new Appointment and the refusal. `dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)).
+
+```ts
+// The full Appointment resource bookSlot() created. Notice `status: 'booked'`, and that the patient
+// and the slot are references ("Patient/P-001", "Slot/S-1"), not copies.
+dump('bookSlot() result', appt);
+```
+
+```ts
+  // The error the store threw: a plain Error whose message says why the write was refused.
+  dump('caught error', e);
+```
+
 ---
 
 ## Run it
@@ -90,9 +105,25 @@ raw: 238 characters · projection: 58 characters
   Patient/P-002  Ibuprofen 400 mg
 
 free cardiology slots: [ 'S-1', 'S-2' ]
+▼ bookSlot() result
+{
+  resourceType: 'Appointment',
+  id: 'APT-1',
+  status: 'booked',
+  slot: [ { reference: 'Slot/S-1' } ],
+  participant: [ { actor: { reference: 'Patient/P-001' }, status: 'accepted' } ],
+  description: 'Blood-pressure follow-up',
+  start: '2026-10-25T09:00:00+03:00'
+}
 booked APT-1: Patient/P-001 → Slot/S-1 at 2026-10-25T09:00:00+03:00
 second booking of S-1 → Slot S-1 is not free
+▼ caught error
+Error { name: 'Error', message: 'Slot S-1 is not free' }
+  (hidden for readability: stack — set SHOW_RAW=1 to print everything)
+appointments in the store: 1
 ```
+
+The Appointment is a FHIR resource like the Patient: `participant[].actor.reference` points at the patient, `slot[].reference` at the slot, and `start` is copied from the slot. The output is the same on every run, because the store is rebuilt each time.
 
 The projection is a quarter of the size, and has no national ID or phone number.
 

@@ -14,7 +14,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DOCS_DIR } from '@learn/rag';
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 import { cases } from './dataset.ts';
 
 section(`${cases.length} cases`);
@@ -27,6 +27,11 @@ console.table(
     source: c.expectedSource ?? '',
   })),
 );
+
+// Two raw cases, as the harness sees them. Notice which optional fields each kind uses: an answerable
+// case has facts to check (mustContain/mustContainAll), a source and a reference; a must-refuse case has none.
+dump('an answerable case', cases[0]);
+dump('a must-refuse case', cases.find((c) => !c.answerable));
 
 section('Lint');
 const docs = new Set(readdirSync(DOCS_DIR));
@@ -47,4 +52,6 @@ for (const c of cases) {
 const unanswerable = cases.filter((c) => !c.answerable).length;
 console.log(`${cases.length - unanswerable} answerable, ${unanswerable} must-refuse`);
 console.log(problems.length ? problems.map((p) => `❌ ${p}`).join('\n') : '✅ dataset is consistent');
+// The lint result itself: an empty list means every case can be checked and every fact exists in its doc.
+dump('lint problems', problems);
 if (problems.length) process.exitCode = 1;

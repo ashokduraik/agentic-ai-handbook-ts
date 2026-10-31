@@ -57,6 +57,18 @@ const PRICE_OUT = Number(optional('PRICE_PER_MTOK_OUT', offline ? '0.60' : '0'))
 
 Offline uses made-up example prices so the cost columns aren't all zero.
 
+### Step 1b — look at one call's usage
+
+```ts
+    const r = await generateText({ model, prompt: q, maxOutputTokens: 400, instructions: 'Answer in at most two sentences.' });
+```
+
+```ts
+    if (q === questions[0]) dump(`generateText() usage — ${name}`, { text: r.text, finishReason: r.finishReason, usage: r.usage, totalUsage: r.totalUsage });
+```
+
+For the first question of each model, [`dump`](../../shared/README.md#dumplabel-value--print-the-full-returned-value) prints the answer and the token counts the call returned. (The rest of the result is covered in [lesson 01, post 00](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned).) `usage` is for the last step, `totalUsage` for all steps; with no tools they're the same.
+
 ### Step 2 — read the spans back
 
 ```ts
@@ -77,6 +89,13 @@ The `invoke_agent` span is the AI SDK's top-level span for one `generateText` ca
 ```
 
 A span's `duration` is `[seconds, nanoseconds]`. Cost is the formula from above, divided by a million because prices are per million tokens.
+
+```ts
+dump('first invoke_agent span: attributes', firstSpan.attributes);
+dump('cost record (rows[0])', rows[0]);
+```
+
+The first span's attributes next to the row built from it, so you can check the arithmetic.
 
 ### Step 3 — percentiles
 
@@ -115,19 +134,77 @@ npm run post:04           # CHAT_MODEL and FALLBACK_MODEL from .env
 
 ### What you should see
 
-Offline:
+Offline (token counts are fixed; latencies differ by a few ms between runs). Trimmed with "…":
 
 ```
-small-fast     requests=6  p50=296 ms  p95=403 ms  cost=$0.000237  (≈ $0.0396 per 1,000 requests)
+▼ generateText() usage — small-fast
+{
+  text: '(small-fast answer, 59 tokens)',
+  finishReason: 'stop',
+  usage: {
+    inputTokens: 42,
+    inputTokenDetails: { noCacheTokens: 42 },
+    outputTokens: 59,
+    outputTokenDetails: { textTokens: 59 },
+    totalTokens: 101
+  },
+  totalUsage: {
+    …
+  }
+}
+▼ generateText() usage — large-slow
+…
+▼ first invoke_agent span: attributes
+{
+  'gen_ai.operation.name': 'invoke_agent',
+  'gen_ai.provider.name': 'mock',
+  'gen_ai.request.model': 'small-fast',
+  'gen_ai.request.max_tokens': 400,
+  …
+  'gen_ai.usage.input_tokens': 42,
+  'gen_ai.usage.output_tokens': 59,
+  …
+}
+▼ cost record (rows[0])
+{ model: 'small-fast', ms: 346.23, input: 42, output: 59, costUsd: 0.0000417 }
+
+── Per request ─────────────────────────────────────────────────
+small-fast        346 ms  in=  42 out=  59  $0.000042
+…
+── Per model ───────────────────────────────────────────────────
+small-fast     requests=6  p50=295 ms  p95=404 ms  cost=$0.000237  (≈ $0.0396 per 1,000 requests)
    output    0–99   tokens │██████ 6
-large-slow     requests=6  p50=787 ms  p95=1073 ms  cost=$0.000771  (≈ $0.1285 per 1,000 requests)
+large-slow     requests=6  p50=787 ms  p95=1072 ms  cost=$0.000771  (≈ $0.1285 per 1,000 requests)
    output  100–199  tokens │███ 3
    output  200–299  tokens │███ 3
 ```
 
+The cost record checks out: (42 × 0.15 + 59 × 0.60) / 1,000,000 = $0.0000417. The span's `gen_ai.usage.*` values are the same numbers `generateText` returned in `usage`.
+
 The larger model is about 3× the cost and 3× the latency, because it writes about 3× the tokens.
 
-Live on the box (`qwen3:0.6b` and `qwen2.5:0.5b`), all answers were under 100 tokens and cost $0 (no prices set). The first `qwen2.5:0.5b` request took 1.8 s while the model loaded into memory, the rest 160–430 ms. With only six requests, that one cold start *is* the p95.
+Live on the box (`qwen3:0.6b` and `qwen2.5:0.5b`), cost is $0 (no prices set), so the cost record shows `costUsd: 0`:
+
+```
+▼ generateText() usage — qwen3:0.6b
+{
+  text: 'The visiting hours on the cardiology ward are typically from 10:00 AM to 1:00 PM, allowing patients to visit during their normal working hours.',
+  finishReason: 'stop',
+  usage: {
+    inputTokens: 39,
+    inputTokenDetails: {},
+    outputTokens: 37,
+    outputTokenDetails: {},
+    totalTokens: 76
+  },
+  …
+}
+…
+▼ cost record (rows[0])
+{ model: 'qwen3:0.6b', ms: 581.74, input: 39, output: 37, costUsd: 0 }
+```
+
+The answer is made up: the model has no hospital data here, and it gives different hours on every run. Answers and latencies differ between runs. In one run all answers were under 100 tokens and the first `qwen2.5:0.5b` request took 1.8 s while the model loaded into memory. In a later run that request took 4.1 s and one answer used 146 tokens. With only six requests, that one cold start *is* the p95.
 
 ## Common gotchas
 

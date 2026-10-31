@@ -17,7 +17,7 @@
 import { cosineSimilarity, embed, embedMany, generateText, registerTelemetry } from 'ai';
 import { OpenTelemetry } from '@ai-sdk/otel';
 import { ATTR_GEN_AI_RETRIEVAL_QUERY_TEXT } from '@opentelemetry/semantic-conventions/incubating';
-import { chatModel, embeddingModel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, embeddingModel, section, stripThinking } from '@learn/shared';
 import { setupTracing } from '../01-traces-and-spans/tracing.ts';
 import { scriptedModel, wordEmbeddingModel } from '../support/mock.ts';
 
@@ -41,12 +41,20 @@ await tracer.startActiveSpan('rag.request', async (root) => {
     // Stage 1: retrieval. The span records HOW GOOD the retrieval looked, not just how long it took.
     const top = await tracer.startActiveSpan('rag.retrieve', async (span) => {
       span.setAttribute(ATTR_GEN_AI_RETRIEVAL_QUERY_TEXT, question); // fine here: a policy question, not PHI
-      const { embeddings } = await embedMany({ model: embedder, values: docs.map((d) => d.text) }); // in real RAG: done at ingest time
-      const { embedding } = await embed({ model: embedder, value: question });
+      const many = await embedMany({ model: embedder, values: docs.map((d) => d.text) }); // in real RAG: done at ingest time
+      // The full embedMany() / embed() results are in lesson 01, post 06. We log just the vector count and size,
+      // and `usage.tokens`: the AI SDK puts the same token count on its embed span.
+      const { embeddings } = many;
+      console.log(`embedMany: ${embeddings.length} vectors of ${embeddings[0]!.length} numbers, usage.tokens=${many.usage.tokens}`);
+      const one = await embed({ model: embedder, value: question });
+      console.log(`embed: 1 vector of ${one.embedding.length} numbers, usage.tokens=${one.usage.tokens}`);
+      const { embedding } = one;
       const ranked = docs
         .map((d, i) => ({ ...d, score: cosineSimilarity(embedding, embeddings[i]!) }))
         .sort((a, b) => b.score - a.score)
         .slice(0, 2);
+      // The retrieval hits: what the app.top_ids / app.top_score attributes below summarise.
+      dump('top 2 hits', ranked);
       span.setAttributes({ 'app.candidates': docs.length, 'app.top_ids': ranked.map((d) => d.id), 'app.top_score': Number(ranked[0]!.score.toFixed(3)) });
       span.end();
       return ranked;
@@ -54,12 +62,16 @@ await tracer.startActiveSpan('rag.request', async (root) => {
 
     // Stage 2: generation, with a cheap quality check recorded on the span.
     const answer = await tracer.startActiveSpan('rag.generate', async (span) => {
-      const { text } = await generateText({
+      const result = await generateText({
         model: generator,
         instructions: 'Answer only from the sources. Cite the source id in square brackets, e.g. [parking]. If the sources do not answer, say so.',
         prompt: `Sources:\n${top.map((d) => `[${d.id}] ${d.text}`).join('\n')}\n\nQuestion: ${question}`,
         maxOutputTokens: 512,
       });
+      // The full generateText result is in lesson 01, post 00. The citations check below reads only `text`;
+      // here we log the usage.
+      console.log(`generateText: inputTokens=${result.usage.inputTokens} outputTokens=${result.usage.outputTokens}`);
+      const { text } = result;
       const cited = [...stripThinking(text).matchAll(/\[([\w-]+)\]/g)].map((m) => m[1]!);
       const valid = cited.length > 0 && cited.every((id) => top.some((d) => d.id === id)); // cited only what we retrieved?
       span.setAttributes({ 'app.citations': cited, 'app.citations_valid': valid });

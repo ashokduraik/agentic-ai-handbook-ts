@@ -151,13 +151,34 @@ console.log(`Engineered context:  ≈ ${tokens(system) + tokens(prompt)} tokens 
 
 We count both versions with the local tokenizer from post 01, so the saving is a number, not a feeling.
 
+Then the file prints the raw output of steps 1–3 with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)), so you can check each step did what it claims:
+
+```ts
+dump('STEP 1 select → relevantPolicies', relevantPolicies);
+dump('STEP 2 trim → the patient fields we kept', { name, age, allergies, medications });
+dump('STEP 3 compress → recentHistory', recentHistory);
+```
+
+`relevantPolicies` is an array with **one** policy object, the NSAIDs one; visiting hours, parking and fall prevention were dropped. The trimmed patient object has four keys and no phone or insurance. `recentHistory` is just two strings. When an answer looks wrong in a real system, this is the first thing to check: *was the right fact in the context at all?*
+
 ### Step 6 — ask the model
 
 ```ts
-const { text, usage } = await generateText({ model: chatModel(), instructions: system, prompt, temperature: 0, maxOutputTokens: 600 });
+const result = await generateText({ model: chatModel(), instructions: system, prompt, temperature: 0, maxOutputTokens: 600 });
+const { text, usage } = result;
 ```
 
 The system prompt goes in `instructions`, the labelled data in `prompt`. Everything you learned in posts 03 and 04, now fed with a context you built on purpose.
+
+```ts
+// We do NOT dump the whole generateText() result again: post 00 already showed it in full.
+// We only print what matters here. `usage.inputTokens` (logged above) is close to our local estimate
+// for the engineered context (not the "dump everything" number), and `finishReason` should be
+// 'stop' — if it says 'length', raise maxOutputTokens: the answer was cut off.
+console.log('finishReason:', result.finishReason);
+```
+
+Compare `usage.inputTokens` (226 in the run below, printed as `inputTokens counted by provider`) with the two local estimates from step 5. It's close to the engineered number (≈194; the provider adds its chat formatting), nowhere near what "dump everything" would cost. And check `finishReason` is `'stop'`: `'length'` would mean the answer was cut off. We saw the full `generateText()` result in [post 00](../00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned).
 
 ---
 
@@ -176,7 +197,49 @@ npm run post:05           # also asks your CHAT_MODEL
 - **Part A**:
   - the token comparison, "Dump everything ≈ 680" against "Engineered ≈ 190";
   - the printed context: one policy, four patient fields, two turns, and no phone or insurance.
-- **Part B**: the answer should say **no ibuprofen without a doctor's order, because of warfarin / bleeding risk**, and give no dose. Small models sometimes add irrelevant facts (such as the penicillin allergy). Notice it, because this is what evals catch.
+- **Part B**: the answer, the provider's input token count and `finishReason: stop`. The answer should say **no ibuprofen without a doctor's order, because of warfarin / bleeding risk**, and give no dose. Small models sometimes add irrelevant facts (such as the penicillin allergy). Notice it, because this is what evals catch.
+
+A real run with a small `qwen3:0.6b` (trimmed at `…`):
+
+```
+── [A] What went into the context, and what we left out ────────
+Dump everything:     ≈ 679 tokens (all 4 policies, full record incl. phone/insurance, 30 chat turns)
+Engineered context:  ≈ 194 tokens (1 policy, 4 patient fields, 2 turns)
+
+--- system ---
+You are a clinical assistant for ward nurses. Use ONLY the facts in <patient> and <policies>.
+…
+Question: Can Fatima in bed 12 have ibuprofen for her knee pain?
+
+── [A2] The raw output of each step ────────────────────────────
+▼ STEP 1 select → relevantPolicies
+[
+  {
+    title: 'NSAIDs and anticoagulants',
+    text: 'Do not give NSAIDs such as ibuprofen to patients on warfarin without a doctor’s order: bleeding risk. Paracetamol is the usual alternative.'
+  }
+]
+▼ STEP 2 trim → the patient fields we kept
+{
+  name: 'Fatima Al-Harbi',
+  age: 64,
+  allergies: [ 'penicillin' ],
+  medications: [ 'warfarin 5 mg daily', 'amlodipine 5 mg daily' ]
+}
+▼ STEP 3 compress → recentHistory
+[
+  'Turn 28: earlier small talk about shift handover and room cleaning.',
+  'Turn 29: earlier small talk about shift handover and room cleaning.'
+]
+
+── [B] The model’s answer using the engineered context ─────────
+No, Fatima cannot have ibuprofen for her knee pain. She is on warfarin and amlodipine, which increases her risk of bleeding, so NSAIDs like ibuprofen should be avoided without a doctor's order.
+inputTokens counted by provider: 226
+Look for: it mentions warfarin / bleeding risk — the one fact that matters, which we made sure was in the context.
+finishReason: stop
+```
+
+Part A and A2 are the same everywhere. The answer, ids and provider token counts depend on your model. (This small model also wrongly blamed amlodipine for the bleeding risk: a "facts mixed up" mistake that evals in lesson 05 are built to catch.)
 
 ## Common gotchas
 

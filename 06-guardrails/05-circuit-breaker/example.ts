@@ -14,8 +14,8 @@
  *       npx tsx 05-circuit-breaker/example.ts --offline  (A only)
  * Post 06 imports CircuitBreaker from this file.
  */
-import { generateText, type LanguageModel } from 'ai';
-import { chatModel, isMain, section } from '@learn/shared';
+import { APICallError, generateText, type LanguageModel } from 'ai';
+import { chatModel, dump, isMain, section } from '@learn/shared';
 import { failingModel, scriptedModel } from '../support/mock-models.ts';
 
 export class CircuitBreaker {
@@ -47,6 +47,8 @@ export class CircuitBreaker {
   }
 }
 
+let shownOpenError = false; // dump the breaker's own error only the first time
+
 async function callThrough(breaker: CircuitBreaker, model: LanguageModel, label: string) {
   const t0 = performance.now();
   try {
@@ -55,6 +57,15 @@ async function callThrough(breaker: CircuitBreaker, model: LanguageModel, label:
   } catch (e) {
     const ms = Math.round(performance.now() - t0);
     console.log(`${label}: ❌ ${(e as Error).message.slice(0, 50).padEnd(50)} ${ms} ms  state=${breaker.state}`);
+    // Two very different errors reach this catch. A real failure is an APICallError with a statusCode
+    // (its full shape: post 04): we log only the fields that matter. The breaker's refusal is a plain
+    // Error with no statusCode and no url (no request was sent at all): dump the first one in full.
+    if (APICallError.isInstance(e)) {
+      console.log(`  → APICallError statusCode=${e.statusCode} isRetryable=${e.isRetryable}${e.responseBody ? ` responseBody=${e.responseBody}` : ''}`);
+    } else if (!shownOpenError) {
+      shownOpenError = true;
+      dump(`${label.trim()}: caught error`, e);
+    }
   }
 }
 

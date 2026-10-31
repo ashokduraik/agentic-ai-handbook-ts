@@ -150,15 +150,42 @@ The router is post 01's `if`: tool calls → `tools`, otherwise `END`. The plain
 ### Step 6 — stream node-by-node updates
 
 ```ts
-const stream = await graph.stream(
-  { messages: [new HumanMessage('When is patient P-001 seeing radiology?')] },
-  { streamMode: 'updates' },
-);
+let firstUpdate = true; // only the first event is dumped in full (the others are one-line summaries)
 for await (const update of stream) {
+  if (firstUpdate) {
+    // The raw event, shown in full ONCE. Notice its shape: { <node name>: <the partial update that node returned> }.
+    // The agent node returns an AIMessage (look at `tool_calls`, and `usage_metadata` when live).
+    // The later events have the same shape, so below we print one short line per message instead.
+    dump('first stream update', update);
+    firstUpdate = false;
+  }
   for (const [node, delta] of Object.entries(update)) {
+    for (const m of (delta as { messages?: BaseMessage[] }).messages ?? []) {
+      const calls = AIMessage.isInstance(m) && m.tool_calls?.length ? ` → asks for ${JSON.stringify(m.tool_calls.map((c) => [c.name, c.args]))}` : '';
+      // The tools node returns ToolMessages; `tool_call_id` points at the model's call they answer.
+      const answers = ToolMessage.isInstance(m) ? ` (answers ${m.tool_call_id})` : '';
+      console.log(`[${node}] ${m.getType()}: ${stripThinking(String(m.content)).slice(0, 200)}${calls}${answers}`);
+    }
+  }
+}
 ```
 
-Each `update` looks like `{ agent: { messages: [...] } }` or `{ tools: { messages: [...] } }`: the node's name and what it returned. The example prints one line per message.
+Each `update` looks like `{ agent: { messages: [...] } }` or `{ tools: { messages: [...] } }`: the node's name and what it returned. The example prints one line per message, and for a `ToolMessage` it adds which call it answers.
+
+The **first** update is also printed raw with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)). Later updates have the same `{ node: { messages } }` shape, so we only print their one-line summary to keep the output short.
+
+These are LangChain message objects, so the fields have LangChain names (`dump` hides LangChain's internal `lc_*` bookkeeping fields):
+
+| Field | On | What it is |
+|---|---|---|
+| `content` / `text` | all | The message text. Empty (`''`) when the model only asked for a tool. |
+| `contentBlocks` | all | The same content as typed blocks: `text`, `tool_call`, and with a thinking model a `reasoning` block holding its thinking. |
+| `tool_calls` | `AIMessage` | `{ name, args, id, type: 'tool_call' }` for each tool the model wants. This is what the router checks. |
+| `tool_call_id` | `ToolMessage` | The `id` of the call this result answers. It must match, just like `toolCallId` in post 01. The example prints it as `(answers …)`. |
+| `usage_metadata` | `AIMessage` (live) | Tokens: `input_tokens`, `output_tokens`, `total_tokens`. |
+| `response_metadata` | `AIMessage` (live) | Ollama's raw details: `model`, `done_reason` (`'stop'`, or `'length'` if it ran out of tokens), and timings in **nanoseconds** (`total_duration`, `eval_duration`). |
+| `additional_kwargs.reasoning_content` | `AIMessage` (live) | The thinking again, as a plain string; `dump` shows a note instead of printing it twice. |
+| `id` | all | A random id for the message. Yours will differ. |
 
 ---
 
@@ -174,15 +201,102 @@ npm run post:03           # your CHAT_MODEL through Ollama
 
 ### What you should see
 
-Three lines, in this order:
+The first update dumped in full, then one summary line for every message. The summaries, in order:
 
 ```
 [agent] ai:  → asks for [["list_appointments",{"patientId":"P-001"}]]
-[tools] tool: [{"id":"A-100",...},{"id":"A-101",...,"dept":"radiology","when":"2026-11-05 14:00"}]
-[agent] ai: Patient P-001 is seeing radiology on 2026-11-05 14:00.
+[tools] tool: [{"id":"A-100",...},{"id":"A-101",...,"dept":"radiology","when":"2026-11-05 14:00"}] (answers call-1)
+[agent] ai: P-001 has radiology on 2026-11-05 at 14:00.
 ```
 
-The offline run always looks like this. The live run did too on the box with a 0.6 B model; only the wording of the last line changes.
+This is the offline run (the scripted model), which always looks like this. A live run has the same three lines, except that the call id after `answers` is made up by the model's provider, and the wording of the last line is the model's own (for example *"Patient P-001 is seeing radiology on 2026-11-05 14:00."*).
+
+The offline run in full (trimmed at `…`; only the message `id`s will differ on your machine):
+
+```
+── Node-by-node updates ────────────────────────────────────────
+▼ first stream update
+{
+  agent: {
+    messages: [
+      AIMessage {
+        contentBlocks: [
+          { type: 'text', text: '' },
+          {
+            type: 'tool_call',
+            id: 'call-1',
+            name: 'list_appointments',
+            args: { patientId: 'P-001' }
+          }
+        ],
+        text: '',
+        id: '224afe18-7f68-43e2-b9a4-c02040626029',
+        content: '',
+        additional_kwargs: {},
+        response_metadata: {},
+        type: 'ai',
+        tool_calls: [ { id: 'call-1', name: 'list_appointments', args: { patientId: 'P-001' } } ],
+        invalid_tool_calls: []
+      }
+    ]
+  }
+}
+  (hidden for readability: agent.messages[].lc_* — set SHOW_RAW=1 to print everything)
+[agent] ai:  → asks for [["list_appointments",{"patientId":"P-001"}]]
+[tools] tool: [{"id":"A-100",...},{"id":"A-101",...,"dept":"radiology","when":"2026-11-05 14:00"}] (answers call-1)
+[agent] ai: P-001 has radiology on 2026-11-05 at 14:00.
+```
+
+With a live `qwen3:0.6b` the first `AIMessage` also carries the model's thinking and its token counts (trimmed):
+
+```
+      AIMessage {
+        contentBlocks: [
+          {
+            type: 'reasoning',
+            reasoning: 'Okay, the user is asking when patient P-001 is seeing radiology. Let me check the tools available. …'
+          },
+          {
+            type: 'tool_call',
+            id: 'a2567d21-08e0-45e4-b97b-21f2a8771d78',
+            name: 'list_appointments',
+            args: { patientId: 'P-001' }
+          }
+        ],
+        …
+        response_metadata: {
+          model_provider: 'ollama',
+          model: 'qwen3:0.6b',
+          created_at: '2026-10-24T15:23:21.837933739Z',
+          done: true,
+          done_reason: 'stop',
+          total_duration: 3961307983,
+          …
+          prompt_eval_count: 176,
+          …
+          eval_count: 269,
+          eval_duration: 3815703000
+        },
+        type: 'ai',
+        tool_calls: [
+          {
+            name: 'list_appointments',
+            args: { patientId: 'P-001' },
+            id: 'a2567d21-08e0-45e4-b97b-21f2a8771d78',
+            type: 'tool_call'
+          }
+        ],
+        invalid_tool_calls: [],
+        usage_metadata: {
+          input_tokens: 176,
+          output_tokens: 269,
+          total_tokens: 445,
+          …
+        }
+      }
+```
+
+269 output tokens just to ask for one tool: almost all of it is thinking. Your ids, timings and token counts will differ.
 
 ## Common gotchas
 

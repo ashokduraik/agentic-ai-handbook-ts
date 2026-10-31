@@ -71,6 +71,22 @@ Open [`example.ts`](./example.ts). `createCache()` returns a middleware (post 05
 
 The demo then asks the same question four times: plain, plain again, with a tool, and with a different temperature.
 
+### Step 4 — compare a miss and a hit
+
+```ts
+  const first = await timed('first ask', {});
+```
+
+```ts
+  const peek = (r: typeof first) => console.log(`    response.id=${r.response.id} timestamp=${r.response.timestamp.toISOString()} usage.totalTokens=${r.usage.totalTokens}`);
+  peek(first);
+  const second = await timed('same question again', {});
+  peek(second);
+  console.log('    same text as the first ask:', second.text === first.text);
+```
+
+The demo's `timed` helper now returns the result. We don't dump the full result of the miss and of the hit ([all the fields](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned)); `peek` logs the three fields that differ or don't. At the end, `dump('cache.stats', cache.stats)` ([`dump`](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) prints the cache's counters: this is the first time this course shows them.
+
 ---
 
 ## Run it
@@ -87,6 +103,8 @@ npm run post:06
 
 Live on the box (`qwen3:0.6b`):
 
+Times and answers differ between runs. In one run:
+
 ```
 first ask                           5718 ms   hits=0 misses=1
 same question again                    1 ms   hits=1 misses=1
@@ -95,6 +113,27 @@ with temperature 0.9                7543 ms   hits=1 misses=3
 ```
 
 5.7 seconds became 1 millisecond. The tool and temperature calls were correctly **misses**. (This small model "thinks" at length, hence several seconds per answer.)
+
+A later run, with the extra log lines (trimmed with "…"):
+
+```
+  first ask                            988 ms   hits=0 misses=1
+    response.id=aitxt-OBGE2l3WZ12VbKrc8cWVPUOC timestamp=2026-10-24T15:58:41.061Z usage.totalTokens=112
+  same question again                    1 ms   hits=1 misses=1
+    response.id=aitxt-khqHyfMEYAVrG1xshllBysph timestamp=2026-10-24T15:58:41.061Z usage.totalTokens=112
+    same text as the first ask: true
+…
+  with a lookup tool                   852 ms   hits=1 misses=2
+  with temperature 0.9                1742 ms   hits=1 misses=3
+▼ cache.stats
+{ hits: 1, misses: 3 }
+```
+
+| Field | Miss vs hit |
+| --- | --- |
+| `text`, `usage` | Identical (`same text … true`, same `usage.totalTokens`): the stored model response was replayed. `usage` still reports 112 tokens, though none were used the second time. Don't bill from it after a cache. |
+| `response.timestamp` | Identical: Ollama's own timestamp was stored with the response. (Offline the fake model sends none, so the AI SDK stamps each call with the current time.) |
+| `response.id` | Different: Ollama sends no id, so the AI SDK makes a new one per call. |
 
 ## Common gotchas
 

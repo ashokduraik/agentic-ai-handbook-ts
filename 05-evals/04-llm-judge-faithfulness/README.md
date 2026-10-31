@@ -91,6 +91,22 @@ const judge = offline ? overlapJudge : chatModel(judgeId);
 
 `JUDGE_MODEL` if set, otherwise `CHAT_MODEL`. With `--offline`, a fake judge marks a claim "supported" when most of its words appear in the context: words, not meaning, on purpose.
 
+### Look at what the judge returned
+
+```ts
+dump('faithfulness() result', result);
+```
+
+`dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) prints the judge's whole return value, the same object the harness in post 06 records:
+
+| Field | What it tells you |
+|---|---|
+| `score` | Supported claims ÷ all claims, from 0 to 1. This is the number a report or a gate sees. |
+| `claims[].claim` | A claim **as the judge wrote it** in step 1. Compare its wording with the answer: if the judge drops a "not" while rephrasing, a wrong answer can look faithful. |
+| `claims[].supported` | The judge's verdict for that claim in step 2. |
+
+The ✅/❌ lines are printed from this same object. Read the `claims` whenever a score surprises you: the number alone never says *why*.
+
 ---
 
 ## Run it
@@ -105,27 +121,67 @@ npm run post:04:offline                           # word-overlap fake judge
 
 ### What you should see
 
-With `JUDGE_MODEL=qwen3:1.7b`:
+With `JUDGE_MODEL=qwen3:1.7b` (trimmed with "…"; the claims are worded differently on every run):
 
 ```
 ── faithful: "No. Children under 12 may not visit the ICU unless the charge nurse approves [1]." ──
-  ✅ Children under 12 may not visit the ICU unless the charge nurse approves.
-  ✅ This restriction is outlined in the provided source.
+  ✅ Children under 12 may not visit the ICU without the charge nurse's approval.
+  ✅ The approval is required for any visit to the ICU.
+  …
+  ✅ The charge nurse has the final authority over ICU visitations.
   faithfulness = 1.00
+▼ faithfulness() result
+{
+  score: 1,
+  claims: [
+    {
+      claim: "Children under 12 may not visit the ICU without the charge nurse's approval.",
+      supported: true
+    },
+    { claim: 'The approval is required for any visit to the ICU.', supported: true },
+    …
+  ]
+}
 
 ── flipped: "Yes, children under 12 can visit the ICU, provided they are approved by the charge nurse. …" ──
   ❌ Children under 12 can visit the ICU.
   ❌ Visits are approved by the charge nurse.
   ✅ Visitors must follow hand hygiene and gown requirements.
-  ❌ These rules apply to all visitors under 12 years old.
-  faithfulness = 0.25
+  ✅ These requirements are specified in the guidelines.
+  faithfulness = 0.50
+▼ faithfulness() result
+{
+  score: 0.5,
+  claims: [
+    { claim: 'Children under 12 can visit the ICU.', supported: false },
+    { claim: 'Visits are approved by the charge nurse.', supported: false },
+    { claim: 'Visitors must follow hand hygiene and gown requirements.', supported: true },
+    { claim: 'These requirements are specified in the guidelines.', supported: true }
+  ]
+}
 ```
 
-Caught: the flipped answer scores 0.25, and the ❌ lines point at the exact problem. (Notice the judge also *added* a claim, "these rules apply to all visitors under 12", that wasn't really in the answer. Judges are imperfect.)
+Caught: the flipped answer scores 0.50, and the ❌ claims point at the exact problem. But look at the `claims` the judge extracted. For the one-sentence faithful answer it wrote **8** claims, several of them repeats or things the answer never said ("The charge nurse has the final authority over ICU visitations"). For the flipped answer it added "These requirements are specified in the guidelines", an easy ✅ that pulls the score up. The score depends on how the judge splits the answer, not only on whether the answer is right. (An earlier run split the flipped answer into four different claims and scored it 0.25.)
 
-With the tiny `qwen3:0.6b` as judge, **both** answers scored 1.00: it marked *"Yes, children under 12 can visit the ICU"* as supported. In the harness run (post 06) it also gave 1.0 to a real app answer that said *"Yes, a 9-year-old can visit"*. A judge weaker than the problem is worse than no judge: it adds false confidence.
+With the tiny `qwen3:0.6b` as judge, **both** answers scored 1.00. It copied each answer as a single claim and marked *"Yes, children under 12 can visit the ICU, provided they are approved by the charge nurse. They must follow the hand hygiene and gown requirements."* as `supported: true`. In the harness run (post 06) it also gave 1.0 to a real app answer that said *"Yes, a 9-year-old can visit"*. A judge weaker than the problem is worse than no judge: it adds false confidence.
 
-The offline fake judge fails the same way (it scores the flipped answer 1.00 and the correct "No." 0.50), because it compares words, exactly like post 03's checks.
+The offline fake judge fails the same way (it scores the flipped answer 1.00 and the correct answer 0.50), because it compares words, exactly like post 03's checks. Its dump shows why the correct answer lost half its score:
+
+```
+▼ faithfulness() result
+{
+  score: 0.5,
+  claims: [
+    { claim: 'No.', supported: false },
+    {
+      claim: 'Children under 12 may not visit the ICU unless the charge nurse approves [1].',
+      supported: true
+    }
+  ]
+}
+```
+
+The fake splits on sentences, so the one word that carries the meaning, "No.", becomes a claim of its own, and no word of it appears in the context.
 
 ## Common gotchas
 

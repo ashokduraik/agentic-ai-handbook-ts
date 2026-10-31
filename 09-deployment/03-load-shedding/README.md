@@ -54,7 +54,21 @@ export function createLimiter(max: number) {
       limiter.release(); // 3. ALWAYS release, even when the work throws
 ```
 
-### Step 3 — a polite client
+### Step 3 — look at one shed response
+
+The demo dumps the first 429 as a small object. The full HTTP response shape (every header) is in [post 01](../01-validate-at-the-edge/README.md#step-4--look-at-the-full-response), so here we pick out `status`, `statusText`, the one header that matters (`retry-after`) and the JSON body. `dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)).
+
+```ts
+  // The first shed request, as a small object: the full HTTP response shape is in lesson 09, post 01. Notice
+  // status 429, the retry-after header and the JSON body: everything a client needs to back off (the polite
+  // client below uses retry-after).
+```
+
+```ts
+          dump('a shed request: 429', { status: r.status, statusText: r.statusText, retryAfter: r.headers.get('retry-after'), json: await r.json() });
+```
+
+### Step 4 — a polite client
 
 ```ts
       const waitS = Number(r.headers.get('retry-after') ?? '1');
@@ -75,6 +89,13 @@ npm run post:03           # no model needed
 ### What you should see
 
 ```
+▼ a shed request: 429
+{
+  status: 429,
+  statusText: 'Too Many Requests',
+  retryAfter: '1',
+  json: { error: 'busy, retry later' }
+}
 statuses: 200 200 429 429 429 429
 #1: 200 on try 1
 #2: 200 on try 1
@@ -82,7 +103,7 @@ statuses: 200 200 429 429 429 429
 #4: 200 on try 2
 ```
 
-(Which client needs a second try depends on the random jitter.)
+The 429 comes back at once, without waiting for the 300 ms "model". `retry-after: '1'` is in seconds, and it is a string: the polite client converts it with `Number()`. Which client needs a second try depends on the random jitter.
 
 ## Common gotchas
 

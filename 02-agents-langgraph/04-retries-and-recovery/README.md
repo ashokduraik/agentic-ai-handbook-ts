@@ -115,6 +115,33 @@ const fallback: GraphNode<typeof LabState> = async (state) => ({
 
 The fallback says what failed and what to do next. It does not guess an HbA1c.
 
+### Step 5 — look at the final state
+
+```ts
+const recovered = await graph.invoke({ patientId: 'P-001' });
+console.log(recovered.reply);
+// The final state has the same shape as in post 02 (every field of the schema), so we do not dump
+// it again: we print only the two fields that decide recovery vs. fallback.
+// Notice: `labs` is filled and there is no `error`, so the router chose `summarise`.
+// The two failed attempts left no trace in state: a retry simply runs the node again.
+console.log('labs in state: ', recovered.labs);
+console.log('error in state:', recovered.error);
+```
+
+```ts
+const failed = await graph.invoke({ patientId: 'P-001' });
+console.log(failed.reply);
+// Same two fields. Notice: no `labs`, but an `error`: the node RECORDED the failure in state,
+// which is what let the conditional edge route to `fallback` instead of crashing the run.
+console.log('labs in state: ', failed.labs);
+console.log('error in state:', failed.error);
+```
+
+We saw the full `graph.invoke()` final state in [post 02](../02-state-graphs/README.md#step-4--run-it), so here we only print the two fields that matter. Compare the two:
+
+- **A** has `labs` and **no** `error` (it prints `undefined`). The two timeouts left no trace: a retry just runs the node again from the same input state, so only the successful attempt's update is kept.
+- **B** has **no** `labs` but an `error` of `Lab API timeout`. That field is the whole trick: the node turned an exception into **data in state**, and data is something an edge can route on.
+
 ---
 
 ## Run it
@@ -130,7 +157,28 @@ npm run post:04
 
 - **A**: calls #1 and #2 time out, #3 is `ok`, then `Latest labs for P-001: {...}`. The user never noticed the outage.
 - **B**: calls #1, #2 and #3 all time out, then `Lab results are unavailable right now (Lab API timeout). A ticket was raised...`.
+- After each reply, the `labs` and `error` fields of the final state (see Step 5).
 - The run takes a few seconds: that is the backoff waiting between attempts.
+
+A real run (no model, so yours will match):
+
+```
+── A. API fails twice, then recovers → retryPolicy saves the day 
+  ↳ lab API call #1: timeout
+  ↳ lab API call #2: timeout
+  ↳ lab API call #3: ok
+Latest labs for P-001: {"patientId":"P-001","hba1c":"7.9 %","ldl":"3.1 mmol/L"}
+labs in state:  { patientId: 'P-001', hba1c: '7.9 %', ldl: '3.1 mmol/L' }
+error in state: undefined
+
+── B. API is down → retries run out → fallback node ────────────
+  ↳ lab API call #1: timeout
+  ↳ lab API call #2: timeout
+  ↳ lab API call #3: timeout
+Lab results are unavailable right now (Lab API timeout). A ticket was raised; please check the lab portal.
+labs in state:  undefined
+error in state: Lab API timeout
+```
 
 ## Common gotchas
 

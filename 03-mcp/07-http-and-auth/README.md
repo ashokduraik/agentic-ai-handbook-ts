@@ -117,6 +117,35 @@ await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { hea
 
 `requestInit` is passed to `fetch` on every request, so the header goes with every message.
 
+### Step 5 — look at the responses
+
+The file uses the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) for the two shapes that are new here: the refused connection, both as the client saw it and as a raw HTTP response:
+
+```ts
+dump('connect error', { name: (e as Error).name, code: (e as { code?: number }).code, message: (e as Error).message });
+```
+
+```ts
+const raw401 = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+dump('HTTP response without a token', {
+  status: raw401.status,
+  statusText: raw401.statusText,
+  wwwAuthenticate: raw401.headers.get('www-authenticate'),
+  json: await raw401.json(),
+});
+```
+
+The client's error carries `code: 401`, the HTTP status. The raw response shows exactly what our HTTP layer sent: status `401 Unauthorized`, a `WWW-Authenticate: Bearer realm="clinic"` header (the MCP auth spec expects it), and the JSON body `{ error: 'invalid_token' }`. MCP never saw this request.
+
+The `callTool` results are ordinary `tools/call` results (full shape in [lesson 03 post 02](../02-tools/README.md)), so the file logs only `isError` and the text:
+
+```ts
+console.log('cancel → isError =', denied.isError, '|', text(denied));
+console.log('cancel → isError =', done.isError ?? false, '|', text(done));
+```
+
+The list text starts with `(for reception-dashboard)`: the handler read the caller from `extra.authInfo`. The viewer's cancel is `isError: true` with `Forbidden: …`, so authorization failed **inside the tool**, over a perfectly valid HTTP connection. The nurse's result has no `isError` and names the authenticated client.
+
 ---
 
 ## Run it
@@ -148,6 +177,34 @@ cancel → isError = false | Cancelled A-101 (by ward-3-tablet)
 ```
 
 Notice the viewer **can see** `cancel_appointment` in the list but can't use it. Listing is not permission; the check in the handler is.
+
+With the two dumps (a real run, no model, so yours will match; trimmed at `…`):
+
+```
+── 1. No token → the HTTP layer refuses before MCP runs ────────
+connect failed: Streamable HTTP error: Error POSTing to endpoint: {"error":"invalid_token"}
+▼ connect error
+{
+  name: 'Error',
+  code: 401,
+  message: 'Streamable HTTP error: Error POSTing to endpoint: {"error":"invalid_token"}'
+}
+▼ HTTP response without a token
+{
+  status: 401,
+  statusText: 'Unauthorized',
+  wwwAuthenticate: 'Bearer realm="clinic"',
+  json: { error: 'invalid_token' }
+}
+…
+── 2. Viewer token → can read, cannot cancel ──────────────────
+tools: [ 'list_appointments', 'cancel_appointment' ]
+list  : (for reception-dashboard) [{"id":"A-101","patientId":"P-001",...,"status":"booked"}]
+cancel → isError = true | Forbidden: role "viewer" may not cancel
+
+── 3. Nurse token → allowed ────────────────────────────────────
+cancel → isError = false | Cancelled A-101 (by ward-3-tablet)
+```
 
 ## Common gotchas
 

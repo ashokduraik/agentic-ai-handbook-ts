@@ -14,7 +14,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { embed } from 'ai';
-import { embeddingModel, modelLabel, section, stripThinking } from '@learn/shared';
+import { dump, embeddingModel, modelLabel, section, stripThinking } from '@learn/shared';
 import { DOCS_DIR, answer, checkCitations, chunkMarkdown, openStore } from '../pipeline/rag.ts';
 import { cannedModel, fakeEmbed } from '../pipeline/offline-fakes.ts';
 
@@ -46,6 +46,10 @@ for (const { q, offlineReply } of questions) {
   const a = await answer(q, contexts, offline ? cannedModel(offlineReply) : undefined); // undefined → chatModel()
   console.log(`\n  answer (${offline ? 'canned' : modelLabel()}): ${stripThinking(a.answer)}`);
   console.log(`  answerable=${a.answerable}  citations=${JSON.stringify(a.citations)}  citationsValid=${a.citationsValid}`);
+  // The full answer() result: the model's structured output (answer, citations, answerable), our
+  // checkCitations() verdict (citationsValid, invalidCitations), and the `contexts` it was given.
+  // Notice the citations are numbers: [1] means contexts[0].
+  dump('answer() result', a);
 }
 
 section('checkCitations catches bad citations, in code');

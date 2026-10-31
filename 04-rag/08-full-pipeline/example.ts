@@ -29,14 +29,18 @@ if (command === 'ingest') {
 if (!store.count()) throw new Error('Empty store: run `npm run ingest` first');
 
 if (command === 'search') {
-  const { embedding } = await embed({ model: embeddingModel(), value: question });
+  const embedded = await embed({ model: embeddingModel(), value: question });
+  // Full embed result: lesson 01, post 06. Notice `usage.tokens`: a query costs a few tokens, ingest costs the whole corpus.
+  console.log('embed: usage.tokens =', embedded.usage.tokens);
+  const { embedding } = embedded;
   const print = (hits: Hit[]) => hits.forEach((h, i) => console.log(`  ${i + 1}. ${h.score.toFixed(4)}  ${h.heading}`));
   section(`Vector — "${question}"`);
   print(store.vectorSearch(embedding, 4));
   section('Keyword (BM25)');
   print(store.keywordSearch(question, 4));
   section('Hybrid (RRF)');
-  print(store.hybridSearch(question, embedding, 4));
+  const hybrid = store.hybridSearch(question, embedding, 4);
+  print(hybrid); // score = RRF; the full hit shape is in posts 04 and 05
 } else {
   // ask: the whole pipeline in two calls
   section('Retrieve + rerank');
@@ -45,10 +49,15 @@ if (command === 'search') {
   candidates.forEach((c, i) => console.log(`  ${i + 1}. rrf=${c.score.toFixed(4)} ${c.heading}`));
   console.log(`after rerank (RERANKER=${process.env.RERANKER ?? 'llm'}):`);
   top.forEach((c, i) => console.log(`  [${i + 1}] score=${c.score.toFixed(3)} ${c.heading}`));
+  // `top` is the sources [1]-[3] the model will see (full hit shape: posts 04-06). Notice `score`:
+  // the judge's 0-10 with RERANKER=llm, or still the RRF score with RERANKER=none.
   console.log(`  (${Math.round(performance.now() - t0)} ms)`);
 
   section('Answer');
   const a = await answer(question, top); // grounded, cited, may refuse
   console.log(stripThinking(a.answer));
   console.log({ answerable: a.answerable, citations: a.citations, citationsValid: a.citationsValid });
+  // Only the extra fields of answer() (full result: post 07). Notice `invalidCitations` (numbers that point
+  // at no source) and `contexts` (the same three hits as above, kept so you can show sources next to the answer).
+  console.log('invalidCitations:', a.invalidCitations, '| contexts[0].text:', a.contexts[0]?.text);
 }

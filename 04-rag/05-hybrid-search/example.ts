@@ -11,7 +11,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { embed } from 'ai';
-import { embeddingModel, section } from '@learn/shared';
+import { dump, embeddingModel, section } from '@learn/shared';
 import { DOCS_DIR, chunkMarkdown, openStore, type Hit } from '../pipeline/rag.ts';
 import { fakeEmbed } from '../pipeline/offline-fakes.ts';
 
@@ -32,9 +32,16 @@ for (const q of questions) {
   const queryVector = offline ? fakeEmbed(q) : (await embed({ model: embeddingModel(), value: q })).embedding;
   section(`"${q}"`);
   console.log('  Vector (cosine): meaning');
-  print(store.vectorSearch(queryVector, 3));
+  const vector = store.vectorSearch(queryVector, 3);
+  print(vector);
   console.log('  Keyword (BM25): exact words only');
-  print(store.keywordSearch(q, 3));
+  const keyword = store.keywordSearch(q, 3);
+  print(keyword);
   console.log('  Hybrid (RRF of both)');
-  print(store.hybridSearch(q, queryVector, 3));
+  const hybrid = store.hybridSearch(q, queryVector, 3);
+  print(hybrid);
+  // The best hit of each search, in full. Notice the three `score` scales have nothing in common:
+  // cosine (about 0-1), BM25 (bigger = better, unbounded) and RRF (tiny: 1/(60 + position), summed over both lists).
+  // That is why hybrid search fuses RANKS, never raw scores. `undefined` = no keyword match at all.
+  dump('best hit per search', { vector: vector[0], keyword: keyword[0], hybrid: hybrid[0] });
 }

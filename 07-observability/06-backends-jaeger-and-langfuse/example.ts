@@ -20,7 +20,7 @@ import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 import { LangfuseSpanProcessor } from '@langfuse/otel';
-import { optional, section } from '@learn/shared';
+import { dump, optional, section } from '@learn/shared';
 
 // The attribute names Langfuse reads from OpenTelemetry spans (from Langfuse's JS SDK, v6).
 const LF = {
@@ -80,6 +80,7 @@ const lfSpan = memProvider.getTracer('07-post-06').startSpan('discharge-summary'
 });
 lfSpan.end();
 console.log(memory.getFinishedSpans()[0]!.attributes); // read before shutdown: shutdown clears the memory exporter
+// Full finished-span shape: lesson 07, post 01.
 await memProvider.shutdown();
 
 // ---------------------------------------------------------------------------
@@ -105,4 +106,7 @@ if (process.argv.includes('--offline') || !publicKey || !secretKey) {
     body: JSON.stringify({ traceId, name: 'clinician-thumbs-up', value: 1, dataType: 'NUMERIC' }),
   });
   console.log(`trace ${traceId} sent; score POST → HTTP ${res.status}`);
+  // The HTTP response from Langfuse's scores API. Notice `status` (200 = stored) and the JSON reply,
+  // which carries the new score's id (or an error message explaining what was wrong).
+  dump('score POST response', { status: res.status, statusText: res.statusText, json: await res.json().catch(() => null) });
 }

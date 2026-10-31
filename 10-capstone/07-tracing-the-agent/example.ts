@@ -11,7 +11,7 @@ import { registerTelemetry } from 'ai';
 import { OpenTelemetry } from '@ai-sdk/otel';
 import { setupTracing } from '@learn/07-observability/tracing';
 import { scriptedModel } from '@learn/07-observability/mock';
-import { modelLabel, optional, section } from '@learn/shared';
+import { dump, modelLabel, optional, section } from '@learn/shared';
 import { createAgent } from '../06-the-agent/agent.ts';
 
 const offline = process.argv.includes('--offline');
@@ -36,6 +36,7 @@ const agent = await createAgent({
 try {
   section(`One booking · ${offline ? 'scripted model' : modelLabel()} · exporter: ${exporter}`);
   const r = await agent.ask('Book Fatima Al-Harbi the earliest cardiology slot for a blood-pressure follow-up.');
+  // Just the answer: the AgentResult shape is dumped in post 06, and the trace below shows the same run, step by step.
   console.log('answer:', r.answer.replace(/\s+/g, ' ').slice(0, 160));
 } finally {
   await agent.close();
@@ -59,5 +60,10 @@ if (tracing.memory) {
     }
   };
   print(undefined, 0);
+  // The root span: only the fields this post is about. Notice the app.* attributes the agent set (user, role,
+  // steps, tool_calls, denied, forbidden) and `status`. The full span shape (ids, times, resource, scope) was
+  // dumped in lesson 07, post 01; the duration is already in the tree above.
+  const root = spans.find((s) => s.name === 'agent.ask')!;
+  dump('the agent.ask span: name, attributes and status', { name: root.name, attributes: root.attributes, status: root.status });
 }
 await tracing.shutdown(); // 3. Always flush before exit, or the last spans are lost.

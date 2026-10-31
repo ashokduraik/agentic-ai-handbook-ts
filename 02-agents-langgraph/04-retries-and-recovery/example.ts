@@ -81,11 +81,23 @@ const graph = new StateGraph(LabState)
 // ---------------------------------------------------------------------------
 section('A. API fails twice, then recovers → retryPolicy saves the day');
 calls = 0; attempt = 0; failTimes = 2;
-console.log((await graph.invoke({ patientId: 'P-001' })).reply);
+const recovered = await graph.invoke({ patientId: 'P-001' });
+console.log(recovered.reply);
+// The final state has the same shape as in post 02 (every field of the schema), so we do not dump
+// it again: we print only the two fields that decide recovery vs. fallback.
+// Notice: `labs` is filled and there is no `error`, so the router chose `summarise`.
+// The two failed attempts left no trace in state: a retry simply runs the node again.
+console.log('labs in state: ', recovered.labs);
+console.log('error in state:', recovered.error);
 
 // ---------------------------------------------------------------------------
 // B. Lasting failure: every attempt fails → fallback path
 // ---------------------------------------------------------------------------
 section('B. API is down → retries run out → fallback node');
 calls = 0; attempt = 0; failTimes = 99;
-console.log((await graph.invoke({ patientId: 'P-001' })).reply);
+const failed = await graph.invoke({ patientId: 'P-001' });
+console.log(failed.reply);
+// Same two fields. Notice: no `labs`, but an `error`: the node RECORDED the failure in state,
+// which is what let the conditional edge route to `fallback` instead of crashing the run.
+console.log('labs in state: ', failed.labs);
+console.log('error in state:', failed.error);

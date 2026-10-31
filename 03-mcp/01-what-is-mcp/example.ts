@@ -13,7 +13,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { z } from 'zod';
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 
 // ---------------------------------------------------------------------------
 // 1. The SERVER: wraps "your API" and describes it in a standard way
@@ -58,13 +58,23 @@ section('1. Connect: the handshake (initialize)');
 await server.connect(serverSide);
 await client.connect(clientSide); // sends "initialize", then "notifications/initialized"
 console.log('server says it is:', client.getServerVersion());
+// What the client learned in the handshake. Notice: `capabilities` lists the feature groups this
+// server offers (here `tools`, with `listChanged`): a client only asks for what is listed.
+dump('client.getServerCapabilities()', client.getServerCapabilities());
 
 section('2. Discover: what tools do you have?');
-const { tools } = await client.listTools();
+const listed = await client.listTools();
+const { tools } = listed;
 console.log('tools:', tools.map((t) => t.name));
+// The full tools/list result. Notice: each tool's `inputSchema` is plain JSON Schema, generated from
+// the Zod shape (the enum became `enum: [...]`). This is what a model is shown to decide on a call.
+dump('client.listTools() result', listed);
 
 section('3. Call a tool');
 const result = await client.callTool({ name: 'get_opening_hours', arguments: { department: 'radiology' } });
 console.log('result text:', (result.content as { type: string; text: string }[])[0]?.text);
+// The full tools/call result. Notice: `content` is a LIST of typed parts (here one 'text' part);
+// there is no plain string anywhere, which is why we had to pick out content[0].text above.
+dump('client.callTool() result', result);
 
 await client.close();

@@ -15,7 +15,7 @@
  */
 import { StateGraph, StateSchema, ReducedValue, START, END, type GraphNode } from '@langchain/langgraph';
 import { z } from 'zod';
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 
 // ---------------------------------------------------------------------------
 // 1. STATE: the shape of the data that flows through the graph
@@ -68,11 +68,23 @@ const graph = new StateGraph(TriageState)
 // ---------------------------------------------------------------------------
 // 4. RUN: invoke() with the starting state, get the final state back
 // ---------------------------------------------------------------------------
+let firstNote = true; // only the first run prints the full final state
 for (const note of ['  Severe chest pain since 20 minutes, sweating. ', 'Needs a repeat prescription for knee pain.']) {
   section(`Note: "${note.trim()}"`);
   const final = await graph.invoke({ note });
   console.log('urgency =', final.urgency);
   final.trail.forEach((line, i) => console.log(`  ${i + 1}. ${line}`));
+  if (firstNote) {
+    // The full value invoke() returned: the FINAL STATE, a plain object with every field of the schema.
+    // Notice: `note` is trimmed (intake replaced it), `urgency` was set by classify, and `trail`
+    // has one entry per node because its reducer APPENDS instead of replacing.
+    // We dump it in full only for the FIRST note: the second note returns the same shape.
+    dump('graph.invoke() result (final state)', final);
+    firstNote = false;
+  } else {
+    // Same shape as above, so we only print the `note` field of the final state.
+    console.log('final state note =', final.note);
+  }
 }
 
 section('The graph as a Mermaid diagram (paste into any Markdown viewer)');

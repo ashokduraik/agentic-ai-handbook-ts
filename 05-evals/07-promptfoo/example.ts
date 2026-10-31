@@ -7,7 +7,7 @@
  *
  * Run: npx tsx 07-promptfoo/example.ts ["your question"]   (EMBED_MODEL, CHAT_MODEL, JUDGE_MODEL if set)
  */
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 import JudgeProvider from './judge-provider.ts';
 import RagAppProvider from './rag-provider.ts';
 
@@ -24,3 +24,6 @@ const grade = await new JudgeProvider().callApi(
     'Reply as JSON with reason, pass (boolean) and score (0 to 1).',
 );
 console.log(grade); // { output: '{"reason":…,"pass":…,"score":…}' } — promptfoo parses this JSON
+// The grade as promptfoo will read it, parsed from that string. Notice `pass` decides the test and
+// `reason` is what the promptfoo report shows next to it.
+if ('output' in grade && grade.output) dump('grade.output, parsed', JSON.parse(grade.output));

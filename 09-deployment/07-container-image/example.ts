@@ -10,12 +10,14 @@
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 
 const repoRoot = new URL('../../', import.meta.url).pathname;
 const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
 const dockerignore = readFileSync(new URL('../../.dockerignore', import.meta.url), 'utf8');
 const instructions = dockerfile.split('\n').filter((l) => /^[A-Z]+\s/.test(l)); // skip comments and blank lines
+// The Dockerfile lines the checks below read. Notice the two FROM lines (two stages) and the USER line.
+dump('Dockerfile instructions', instructions);
 
 // 1. Each practice is one small, readable test on the Dockerfile text.
 const checks: [string, boolean][] = [

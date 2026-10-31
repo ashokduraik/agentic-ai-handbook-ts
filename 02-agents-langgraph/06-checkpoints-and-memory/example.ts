@@ -16,7 +16,7 @@ import { StateGraph, StateSchema, MessagesValue, MemorySaver, START, END, type G
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 import { HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { ChatOllama } from '@langchain/ollama';
-import { env, section, stripThinking } from '@learn/shared';
+import { dump, env, section, stripThinking } from '@learn/shared';
 
 // ---------------------------------------------------------------------------
 // A one-node graph that just records each message (so A and B need no model)
@@ -45,6 +45,11 @@ for (const [name, cfg] of [['bed 4', bed4], ['bed 7', bed7]] as const) {
   const { values } = await notes.getState(cfg); // read the latest checkpoint of a thread
   console.log(`${name}:`, values.messages.map((m: BaseMessage) => String(m.content)));
 }
+
+// The full snapshot getState() returns. Notice: `values` is the state, `next` is empty (the run
+// finished), `config.configurable` holds the thread_id AND the checkpoint_id of this snapshot,
+// `metadata.step` counts steps on this thread, and `parentConfig` points at the previous checkpoint.
+dump('notes.getState(bed4)', await notes.getState(bed4));
 
 // Every step left a checkpoint behind: that is the thread's history (for audit, debugging, "time travel").
 let n = 0;
@@ -87,3 +92,8 @@ const same = await chatGraph.invoke(note('What is the patient in bed 4 allergic 
 const other = await chatGraph.invoke(note('What is the patient in bed 4 allergic to?'), t2);
 console.log('same thread :', stripThinking(String(same.messages.at(-1)?.content)));
 console.log('new thread  :', stripThinking(String(other.messages.at(-1)?.content)), '  ← it has never heard of bed 4');
+// We do not dump the whole final state here: post 02 showed a full invoke() state, and the getState()
+// snapshot above showed what a checkpoint holds. We only print the number of messages.
+// Notice: `messages` holds BOTH turns (4 messages: question, answer, question, answer): the
+// checkpointer loaded the first turn before the model ran. The last one is printed above ("same thread").
+console.log('messages in the same-thread state:', same.messages.length);

@@ -15,7 +15,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { z } from 'zod';
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 import { appointments, book, patients, slots } from '../05-stdio-server/appointment-store.ts';
 
 const server = new McpServer({ name: 'clinic-tools', version: '1.0.0' });
@@ -109,15 +109,25 @@ section('A typed result: structuredContent');
 const found = await client.callTool({ name: 'search_slots', arguments: { department: 'cardiology' } });
 const { slots: free } = found.structuredContent as { slots: { id: string; start: string }[] };
 console.log('first free slot, read by CODE:', free[0]?.id, free[0]?.start);
+// The full result. Notice: the SAME data twice: `structuredContent` (an object, checked against
+// outputSchema, for code) and `content[0].text` (a JSON string, for the model).
+dump('callTool(search_slots) result', found);
 
 section('Success, then a business error (isError)');
 const ok = await client.callTool({ name: 'book_appointment', arguments: { patientId: 'P-001', slotId: 'S-1', reason: 'chest pain follow-up' } });
 console.log('book S-1 for P-001 → isError =', ok.isError ?? false, '|', text(ok));
 const taken = await client.callTool({ name: 'book_appointment', arguments: { patientId: 'P-002', slotId: 'S-1', reason: 'check-up' } });
 console.log('book S-1 for P-002 → isError =', taken.isError, '|', text(taken));
+// Both results side by side. Notice: the success has NO `isError` field at all (absent means false);
+// the failure has `isError: true` and the reason as ordinary text content the model can read.
+dump('callTool(book_appointment) — success', ok);
+dump('callTool(book_appointment) — business error', taken);
 
 section('Invalid arguments: rejected by the schema, the handler never runs');
 const bad = await client.callTool({ name: 'search_slots', arguments: { department: 'dermatology' } });
 console.log('isError =', bad.isError, '|', text(bad)?.slice(0, 160));
+// The full result. Notice: invalid arguments do NOT throw on the client: they come back as a normal
+// result with `isError: true`, and the text lists the Zod validation issues (path, allowed values).
+dump('callTool(search_slots, bad args) result', bad);
 
 await client.close();

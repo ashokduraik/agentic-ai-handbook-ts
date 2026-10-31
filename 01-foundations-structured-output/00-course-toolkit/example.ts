@@ -13,7 +13,8 @@ import { generateText } from 'ai';
 //   modelLabel()    → "provider:model" string, for printing
 //   section()       → prints a bold header line in the terminal
 //   stripThinking() → removes <think>…</think> that reasoning models add before the answer
-import { chatModel, modelLabel, section, stripThinking } from '@learn/shared';
+//   dump()          → prints the FULL value a call returned, labelled and readable
+import { chatModel, dump, modelLabel, section, stripThinking } from '@learn/shared';
 
 // ---------------------------------------------------------------------------
 // Part A: what did .env pick?  (no model call yet)
@@ -25,10 +26,21 @@ console.log('Active model:', modelLabel()); // e.g. "ollama:qwen3:8b" — comes 
 // Part B: one call through the toolkit
 // ---------------------------------------------------------------------------
 section('[B] One call');
-const { text } = await generateText({
+const result = await generateText({
   model: chatModel(), // a model OBJECT built from .env; the network call happens inside generateText
   prompt: 'Reply with exactly: toolkit works',
   maxOutputTokens: 300, // room for a reasoning model's <think> block plus the answer
 });
+const { text } = result; // the field you usually want; the lines below show everything else
 console.log('Raw text (first 120 chars):', JSON.stringify(text.slice(0, 120)));
 console.log('After stripThinking:       ', JSON.stringify(stripThinking(text)));
+
+// ---------------------------------------------------------------------------
+// Part C: everything generateText returned
+// ---------------------------------------------------------------------------
+// `text` is one field of a much bigger result object. dump() prints all of it.
+// Notice: `text` (the answer), `finishReason` ('stop' = finished on its own, 'length' = hit
+// maxOutputTokens), `usage` (tokens counted by the provider), `response` (id, model, timestamp)
+// and `steps` (one entry per model call — just one here, because no tools were used).
+section('[C] The full result object');
+dump('generateText() result', result);

@@ -12,7 +12,7 @@
  */
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 import { createApp, type Deps } from './app.ts';
 import { realDeps } from './server.ts';
 
@@ -42,6 +42,9 @@ if (offline) {
   assert.equal((await fetch(`${base}/readyz`)).status, 200);
   assert.equal((await ask('hi')).status, 400, 'too short → 400');
   const ok = await ask('How much is the deposit?');
+  // The service's response body, dumped once: the first time you see the AskResult JSON. Only `status` and
+  // `json`: the full HTTP response shape (headers and all) is in lesson 09, post 01.
+  dump('POST /ask: status and json', { status: ok.status, json: await ok.clone().json() });
   assert.equal(ok.status, 200);
   assert.equal(((await ok.json()) as { answer: string }).answer, 'echo: How much is the deposit? [1]');
   const [a, b] = await Promise.all([ask('first question'), ask('second question')]);
@@ -52,9 +55,13 @@ if (offline) {
   console.log('✅ smoke test passed: healthz, readyz, validation 400, answer 200, load-shedding 429, timeout 504, draining 503');
 } else {
   section('One question through the real service');
-  console.log('readyz:', await (await fetch(`${base}/readyz`)).json());
+  const ready = await fetch(`${base}/readyz`);
+  // /readyz: 200 with { ready, reason } when the models are pulled, 503 otherwise. Just status and json.
+  console.log('readyz:', ready.status, await ready.json());
   const r = await ask('How much is the no-show deposit?');
-  console.log(r.status, await r.json());
+  // /ask: the JSON is the AskResult: answer, citations, answerable, citationsValid. (Dumped once in the
+  // smoke test; the full HTTP response shape is in lesson 09, post 01.)
+  console.log('ask:', r.status, await r.json());
 }
 app.close();
 process.exit(0);

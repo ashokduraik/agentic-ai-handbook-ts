@@ -125,16 +125,26 @@ console.log('bad  →', r.success ? 'valid' : 'invalid\n' + z.prettifyError(r.er
 
 This is the "runtime check" job, and exactly what the SDK will do to the model's reply. `safeParse` never throws; it returns success or a list of problems, and `z.prettifyError` makes that list readable.
 
+Here is what `safeParse` actually returns, printed with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)):
+
+```ts
+dump('safeParse(good)', AppointmentRequest.safeParse(good));
+dump('safeParse(bad).error.issues', r.success ? [] : r.error.issues);
+```
+
+On success you get `{ success: true, data }`, where `data` is the parsed object (typed as `AppointmentRequest`). On failure you get `{ success: false, error }`, and `error.issues` is a list with **one entry per problem**: `path` says which field (`['department']`), `code` says what kind of problem (`'invalid_value'`), `values` lists what would have been allowed, and `message` is the human text. Code can loop over `issues`; that's how the repair loop in lesson 06 tells the model exactly what to fix.
+
 ### Step 4 — ask the model to fill the shape
 
 ```ts
-const { output } = await generateText({
+const result = await generateText({
   model: chatModel(),
   output: Output.object({ schema: AppointmentRequest }), // "reply with JSON matching this schema"
   instructions: 'Extract a structured appointment request from the note. Do not invent facts.',
   prompt: note,
   temperature: 0,
 });
+const { output } = result;
 ```
 
 The only new line compared with post 03 is `output: Output.object(...)`. The `instructions` say "do not invent facts", which pairs with `.nullable()`: the model has an honest way to say "not mentioned".
@@ -149,17 +159,29 @@ console.log('Typed access → output.department =', output.department);
 
 Hover over `output` in your editor: it is `AppointmentRequest`. Your IDE autocompletes `department`, and TypeScript knows it can only be one of the five enum values.
 
+Then the whole result:
+
+```ts
+dump('generateText() result with Output.object', result);
+```
+
+It's the same `generateText` result as in [post 03](../03-model-calls-and-streaming/README.md), with one field that now matters: **`output`**. Compare it with **`text`**. `text` is the raw **string** the model wrote (`'{ "patientName": "Mrs. Fatima Al-Harbi", … }'`); `output` is that string after the SDK ran `JSON.parse` and checked it against your schema, so it's a real object. `content`, `response.messages` and `steps[0].text` all hold the raw string too. In short: the model only ever writes text, and `Output.object` is the layer that turns it into checked data.
+
 ### Step 6 — handle the failure path
 
 ```ts
 } catch (error) {
   // The failure path: reply was not valid JSON or did not match the schema.
-  if (NoObjectGeneratedError.isInstance(error)) console.error('Did not match the schema. Raw reply:\n', error.text);
-  else throw error;
+  if (NoObjectGeneratedError.isInstance(error)) {
+    console.error('Did not match the schema. Raw reply:\n', error.text);
+    // What the error carries: the raw text, why the model stopped, the tokens it used, and the
+    // underlying cause (a JSON parse error or the Zod issues).
+    dump('NoObjectGeneratedError', { text: error.text, finishReason: error.finishReason, usage: error.usage, cause: error.cause });
+  } else throw error;
 }
 ```
 
-Treat the model like any untrusted upstream service. When the reply does not fit, you get a specific error with the raw text, so you can log it, retry once, or send it to a human.
+Treat the model like any untrusted upstream service. When the reply does not fit, you get a specific error with the raw text, so you can log it, retry once, or send it to a human. The `dump` shows everything the error carries: `text` (the raw reply), `finishReason` (`'length'` here usually means the JSON was cut off), `usage`, and `cause` (the JSON parse error or the Zod issues). The run below succeeded, so this path didn't print; you'll see it fire in lesson 06.
 
 ---
 
@@ -178,6 +200,76 @@ npm run post:07           # part B: note → typed object with your CHAT_MODEL
 - **Part A**: `good → valid`. `bad → invalid`, with a readable list of what is wrong: `department` "neuro" and `urgency` "asap" are not allowed values.
 - **Part B**: a JSON object with `department: "cardiology"`, `preferredDate: "2026-11-03"`, and a symptoms list. Then `output.department` is used as a normal typed property.
   - Compare the `urgency` the model chose with what a nurse would choose. That is the "valid, but is it right?" question.
+
+A real run with a small `qwen3:0.6b` (trimmed at `…`):
+
+```
+── [A] Check data against the schema (no model) ────────────────
+good → valid
+bad  → invalid
+✖ Invalid option: expected one of "cardiology"|"orthopedics"|"pediatrics"|"general-medicine"|"unknown"
+  → at department
+✖ Invalid option: expected one of "routine"|"soon"|"urgent"
+  → at urgency
+▼ safeParse(good)
+{
+  success: true,
+  data: {
+    patientName: 'Rahul Menon',
+    department: 'orthopedics',
+    urgency: 'routine',
+    preferredDate: null,
+    symptoms: [ 'knee pain' ]
+  }
+}
+▼ safeParse(bad).error.issues
+[
+  {
+    code: 'invalid_value',
+    values: [ 'cardiology', 'orthopedics', 'pediatrics', 'general-medicine', 'unknown' ],
+    path: [ 'department' ],
+    message: 'Invalid option: expected one of "cardiology"|"orthopedics"|"pediatrics"|"general-medicine"|"unknown"'
+  },
+  {
+    code: 'invalid_value',
+    values: [ 'routine', 'soon', 'urgent' ],
+    path: [ 'urgency' ],
+    message: 'Invalid option: expected one of "routine"|"soon"|"urgent"'
+  }
+]
+
+── [B] Free-text note → typed object from the model ────────────
+Note: Called at 9am: Mrs. Fatima Al-Harbi wants to see a heart doctor, chest tightness on the stairs since last week. Prefers 2026-11-03 if possible.
+{
+  "patientName": "Mrs. Fatima Al-Harbi",
+  "department": "cardiology",
+  "urgency": "urgent",
+  "preferredDate": "2026-11-03",
+  "symptoms": [
+    "chest tightness on the stairs since last week"
+  ]
+}
+Typed access → output.department = cardiology
+▼ generateText() result with Output.object
+DefaultGenerateTextResult {
+  …
+  text: '{ "patientName": "Mrs. Fatima Al-Harbi", "department": "cardiology", "urgency": "urgent", "preferredDate": "2026-11-03", "symptoms": ["chest tightness on the stairs since last week"] }',
+  …
+  finishReason: 'stop',
+  …
+  usage: { inputTokens: 82, inputTokenDetails: {}, outputTokens: 67, outputTokenDetails: {}, totalTokens: 149 },
+  output: {
+    patientName: 'Mrs. Fatima Al-Harbi',
+    department: 'cardiology',
+    urgency: 'urgent',
+    preferredDate: '2026-11-03',
+    symptoms: [ 'chest tightness on the stairs since last week' ]
+  },
+  …
+}
+```
+
+Part A is the same everywhere. Part B's values (here the model kept "Mrs." in the name and chose `urgent`), ids and token counts depend on your model.
 
 ## Common gotchas
 

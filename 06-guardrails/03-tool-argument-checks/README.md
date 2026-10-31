@@ -86,6 +86,22 @@ The fake model plays three steps: a bad call (a name instead of an id, and 365 d
 
 Each step's `content` lists what happened. A `tool-error` part means the arguments were rejected (or `execute` threw). A `tool-result` part means `execute` ran and returned.
 
+```ts
+dump('tool parts from every step', result.steps.flatMap((s) => s.content.filter((p) => p.type.startsWith('tool-'))));
+```
+
+The two lines above show a summary; `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) prints every tool part of every step in full. For a rejected call you get **two** parts:
+
+| Part | Fields to look at |
+|---|---|
+| `tool-call` with `invalid: true` | `input`: the arguments exactly as the model sent them. `error`: an `InvalidToolInputError` whose innermost `cause` is the `ZodError`, with one issue per bad field (`path`, `message`: our "use the id, not the name" text). |
+| `tool-error` | The same `toolCallId` and `input`, and `error` as **text**. This text is what the SDK sends back to the model, so it is the model's only clue for fixing its call. |
+| `tool-result` (for a valid call) | `input` after validation, and `output`: what `execute` returned. |
+
+There is no `tool-result` for `call-0`: execute() never saw the bad arguments.
+
+This is the first time this lesson prints tool parts, so we print them in full. The ordinary `tool-call` and `tool-result` objects are explained in [lesson 01, post 08](../../01-foundations-structured-output/08-tool-calling/README.md); what is new here is the `invalid: true` call and the `tool-error` part. Later posts ([07](../07-tool-allow-lists/README.md), [08](../08-approval-policies/README.md)) only log the parts they care about.
+
 ---
 
 ## Run it
@@ -101,7 +117,82 @@ npm run post:03           # part A + B (calls your CHAT_MODEL)
 ### What you should see
 
 - **Part A**: one `❌ tool-error` for the name/365-day call (an `AI_InvalidToolInputError`), then one `✅ tool-result` for `P-001/amlodipine/30`. The line `execute() really ran for:` lists **only** the good call.
-- **Part B**: with the small test model the call went through correctly (`P-001`, 30 days), but its final sentence said "30 days remaining", which is not what the tool returned. Argument checks protect your API, not the wording of the answer.
+Part A's dump, trimmed with "…" (always the same: the model is scripted):
+
+```
+▼ tool parts from every step
+[
+  {
+    type: 'tool-call',
+    toolCallId: 'call-0',
+    toolName: 'refillPrescription',
+    input: { patientId: 'Fatima Al-Harbi', drug: 'amlodipine', days: 365 },
+    dynamic: true,
+    invalid: true,
+    error: InvalidToolInputError {
+      name: 'AI_InvalidToolInputError',
+      message: 'Invalid input for tool refillPrescription: AI_TypeValidationError: Type validation failed: Value: {"patientId":"Fatima Al-Harbi","drug":"amlodipine","days":365}. … [+434 chars, the details are in cause]',
+      cause: TypeValidationError {
+        name: 'AI_TypeValidationError',
+        message: 'Type validation failed: Value: {"patientId":"Fatima Al-Harbi","drug":"amlodipine","days":365}. … [+434 chars, the details are in cause]',
+        cause: ZodError {
+          name: 'ZodError',
+          issues: [
+            {
+              origin: 'string',
+              code: 'invalid_format',
+              format: 'regex',
+              pattern: '/^P-\\d{3}$/',
+              path: [ 'patientId' ],
+              message: 'patientId must look like P-001 (use the id, not the name)'
+            },
+            {
+              origin: 'number',
+              code: 'too_big',
+              maximum: 90,
+              inclusive: true,
+              path: [ 'days' ],
+              message: 'Too big: expected number to be <=90'
+            }
+          ]
+        },
+        value: { patientId: 'Fatima Al-Harbi', drug: 'amlodipine', days: 365 }
+      },
+      toolInput: '{"patientId":"Fatima Al-Harbi","drug":"amlodipine","days":365}',
+      toolName: 'refillPrescription'
+    }
+  },
+  {
+    type: 'tool-error',
+    toolCallId: 'call-0',
+    toolName: 'refillPrescription',
+    input: { patientId: 'Fatima Al-Harbi', drug: 'amlodipine', days: 365 },
+    error: 'AI_InvalidToolInputError: Invalid input for tool refillPrescription: AI_TypeValidationError: Type validation failed: Value: {"patientId":"Fatima Al-Harbi","drug":"amlodipine","days":365}.\n' +
+      'Error message: [\n' +
+      …
+    dynamic: true
+  },
+  {
+    type: 'tool-call',
+    toolCallId: 'call-1',
+    toolName: 'refillPrescription',
+    input: { patientId: 'P-001', drug: 'amlodipine', days: 30 }
+  },
+  {
+    type: 'tool-result',
+    toolCallId: 'call-1',
+    toolName: 'refillPrescription',
+    input: { patientId: 'P-001', drug: 'amlodipine', days: 30 },
+    output: { status: 'queued', patientId: 'P-001', drug: 'amlodipine', days: 30 },
+    dynamic: false
+  }
+]
+  (hidden for readability: [].error.cause.cause.stack, [].error.cause.stack, [].error.stack — set SHOW_RAW=1 to print everything)
+```
+
+The `tool-error` text is long (it is the whole Zod issue list as JSON), and that is good: the model reads both of our messages and can fix both fields at once.
+
+- **Part B**: with the small test model the call went through correctly (`P-001`, 30 days), but its final sentence said "30 days remaining", which is not what the tool returned. Argument checks protect your API, not the wording of the answer. In a later run the dump held just one `tool-call` (id `call_ntblhwzq`, with `P-001`, 30 days) and its `tool-result`, and the final sentence was fine.
 
 ## Common gotchas
 

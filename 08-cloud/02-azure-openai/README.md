@@ -40,11 +40,23 @@ await generateText({ model: azure('triage-prod'), prompt: 'Hello', maxRetries: 0
 
 `fetch` is our recorder from [`support/fakes.ts`](../support/fakes.ts). Every AI SDK provider accepts a custom `fetch`, which is also how you'd add a corporate proxy or extra logging.
 
+```ts
+dump('request body (Responses API)', requests.at(-1)!.body);
+```
+
+[`dump`](../../shared/README.md#dumplabel-value--print-the-full-returned-value) prints the whole JSON body that would go to Azure.
+
 ### Step 2 — the Chat Completions API
 
 ```ts
 await generateText({ model: azure.chat('triage-prod'), prompt: 'Hello', maxRetries: 0 }).catch(() => {});
 ```
+
+```ts
+dump('request body (Chat Completions)', requests.at(-1)!.body);
+```
+
+The same prompt, in the older API's shape.
 
 ### Step 3 — Entra ID instead of a key
 
@@ -60,10 +72,14 @@ const keyless = createAzure({ resourceName: 'contoso-health-ai', tokenProvider: 
 ### Step 4 — a real call, only on Azure
 
 ```ts
-  const { text, usage } = await generateText({ model: chatModel(), prompt: 'In one sentence: what is triage?', maxOutputTokens: 200 });
+  const result = await generateText({ model: chatModel(), prompt: 'In one sentence: what is triage?', maxOutputTokens: 200 });
 ```
 
-The real call goes through the same `chatModel()` as everything else.
+```ts
+  console.log('response.modelId:', result.response.modelId, '  steps[0].model.provider:', result.steps[0]!.model.provider);
+```
+
+The real call goes through the same `chatModel()` as everything else, and its result has the same fields as on Ollama, so we don't dump it ([all the fields](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned)). We log only the Azure-specific parts.
 
 ---
 
@@ -89,13 +105,49 @@ EMBED_MODEL=<your embedding DEPLOYMENT name>
 
 ### What you should see
 
+Real output of part A (it's the same on every run):
+
 ```
-[A1] url: 'https://contoso-health-ai.openai.azure.com/openai/v1/responses?api-version=v1'
-     auth: 'api-key: demo-key-000…'   body.model: 'triage-prod'
-[A2] url: '…/openai/v1/chat/completions?api-version=v1'
-[A3] auth: 'authorization: Bearer eyJ0e…'
-[B] skipped: AI_PROVIDER is "ollama". …
+── [A1] Key auth, Responses API (the default) ──────────────────
+{
+  url: 'https://contoso-health-ai.openai.azure.com/openai/v1/responses?api-version=v1',
+  auth: 'api-key: demo-key-000…',
+  'body.model': 'triage-prod'
+}
+▼ request body (Responses API)
+{
+  model: 'triage-prod',
+  input: [
+    { role: 'user', content: [ { type: 'input_text', text: 'Hello' } ] }
+  ]
+}
+
+── [A2] Chat Completions API (older deployments and some regions) 
+{
+  url: 'https://contoso-health-ai.openai.azure.com/openai/v1/chat/completions?api-version=v1',
+  auth: 'api-key: demo-key-000…',
+  'body.model': 'triage-prod'
+}
+▼ request body (Chat Completions)
+{ model: 'triage-prod', messages: [ { role: 'user', content: 'Hello' } ] }
+
+── [A3] Entra ID (managed identity): a token instead of a key ──
+{
+  url: 'https://contoso-health-ai.openai.azure.com/openai/v1/responses?api-version=v1',
+  auth: 'authorization: Bearer eyJ0e…',
+  'body.model': 'triage-prod'
+}
+
+[B] skipped: AI_PROVIDER is "ollama". Set AI_PROVIDER=azure and AZURE_* in .env to call Azure for real.
 ```
+
+| Field | What it means |
+| --- | --- |
+| `model` | Your **deployment** name, not a model family. |
+| `input` (Responses API) | The prompt as a list of messages; each message's `content` is a list of typed parts (`input_text`). |
+| `messages` (Chat Completions) | The same prompt in the older shape: `content` is a plain string. |
+
+Part B (only with `AI_PROVIDER=azure`) prints the `response.modelId` / `steps[0].model.provider` line, then the answer and its usage. *Illustrative, not run:* expect `response.modelId` to name the model behind your deployment and `steps[0].model.provider` to be `azure.responses` (that value was checked offline, on the provider object).
 
 Part A was verified on the box. **Part B (a real Azure call) and the Entra ID setup were not tested**: no Azure account was available. Check the AI SDK Azure provider docs if anything has changed.
 

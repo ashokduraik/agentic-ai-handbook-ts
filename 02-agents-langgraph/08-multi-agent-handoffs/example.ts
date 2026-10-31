@@ -99,4 +99,7 @@ for (const request of [
   const final = await graph.invoke({ request }, { recursionLimit: 10 });
   console.log('route  :', final.handoffs.join('  |  '));
   final.answers.forEach((a) => console.log(a));
+  // We do not dump the whole final state: post 02 showed a full invoke() state. The two lines above print
+  // the fields that matter here. Notice: `handoffs` and `answers` grew one entry per agent (their
+  // reducers append), so `route` is the exact path; `request` is unchanged, nobody returned a new value for it.
 }

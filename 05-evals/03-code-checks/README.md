@@ -98,6 +98,14 @@ id: 'icu-children',
 result: { ...ok, answer: 'Yes, children under 12 can visit the ICU, provided they are approved by the charge nurse [1].', sources: ['visiting-hours.md'] },
 ```
 
+### Show the case next to the checks
+
+```ts
+dump(`golden case ${id}`, byId(id));
+```
+
+`dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) prints each golden case once, before its answers. Read it next to the printed `codeChecks` result (one line of JSON, the function's whole return value): every check reads one field of the case. `contains` uses `mustContain`, `containsAll` uses `mustContainAll`, `hit3` uses `expectedSource`. A field the case doesn't have makes its check `null` ("doesn't apply"), which is not the same as `true`.
+
 ---
 
 ## Run it
@@ -116,24 +124,63 @@ npm run post:03
 containsAny("Leave by noon", ["no"]) → false
 containsAny("No, it is not allowed", ["no"]) → true
 
+── noshow-deposit: correct ──
+▼ golden case noshow-deposit
+{
+  id: 'noshow-deposit',
+  question: 'After how many no-shows is a deposit required, and how much is it?',
+  answerable: true,
+  mustContain: [ 'three', '3' ],
+  mustContainAll: [ '100' ],
+  expectedSource: 'appointment-cancellation.md',
+  reference: 'After three no-shows within 12 months a SAR 100 deposit is required for each new booking.'
+}
+  "After three no-shows in 12 months a SAR 100 deposit is required [1]."
+  {"hit3":true,"refusalOk":true,"contains":true,"containsAll":true,"citations":true}
+
 ── noshow-deposit: forgot the amount ──
   "After three no-shows a deposit is required [1]."
   {"hit3":true,"refusalOk":true,"contains":true,"containsAll":false,"citations":true}
 
 ── parking: invented a fee ──
+▼ golden case parking
+{
+  id: 'parking',
+  question: 'How much does hospital parking cost per hour?',
+  answerable: false
+}
   "Parking costs SAR 5 per hour [2]."
   {"hit3":null,"refusalOk":false,"contains":null,"containsAll":null,"citations":null}
-
+…
 ── discharge-time: wrong retrieval ──
+▼ golden case discharge-time
+{
+  id: 'discharge-time',
+  …
+  mustContain: [ '13:00', '1 pm', '1pm' ],
+  expectedSource: 'discharge.md',
+  reference: 'Patients should leave the room by 13:00.'
+}
   "By 13:00 [1]."
   {"hit3":false,"refusalOk":true,"contains":true,"containsAll":null,"citations":true}
 
 ── icu-children: meaning flipped (from lesson 04, post 08) ──
+▼ golden case icu-children
+{
+  id: 'icu-children',
+  question: 'Can a 9 year old visit their grandfather in the ICU?',
+  answerable: true,
+  mustContainAll: [ '12', 'charge nurse' ],
+  expectedSource: 'visiting-hours.md',
+  reference: 'Children under 12 may not visit the ICU unless the charge nurse approves.'
+}
   "Yes, children under 12 can visit the ICU, provided they are approved by the charge nurse [1]."
   {"hit3":true,"refusalOk":true,"contains":null,"containsAll":true,"citations":true}
 ```
 
-Three bugs caught, each by a different check. The last answer is wrong and passes everything.
+Three bugs caught, each by a different check. The last answer is wrong and passes everything: its case only asks for the words `12` and `charge nurse`, and the flipped answer has both.
+
+The `parking` case has no `expectedSource` and no facts, so every check except `refusalOk` is `null`. For a must-refuse case, refusing is the whole test.
 
 This isn't hypothetical. On a real run with `qwen3:0.6b` (post 06), the app said *"Yes, a first visit with a new specialist can be done by telehealth. First visits with a new specialist must be in person…"*, contradicting itself, and `contains: ['in person']` passed.
 

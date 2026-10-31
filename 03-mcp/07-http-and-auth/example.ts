@@ -21,7 +21,7 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 import { appointments, book } from '../05-stdio-server/appointment-store.ts';
 
 // ---------------------------------------------------------------------------
@@ -117,20 +117,37 @@ if (process.argv.includes('--serve')) {
     await connectAs();
   } catch (e) {
     console.log('connect failed:', (e as Error).message.slice(0, 120));
+    // The error the client threw. Notice: `code` is the HTTP status (401): the request never reached MCP.
+    dump('connect error', { name: (e as Error).name, code: (e as { code?: number }).code, message: (e as Error).message });
   }
+  // The same refusal as a raw HTTP response (no MCP client), so you can see what the server sent.
+  // Notice: status 401, the `WWW-Authenticate: Bearer` header the MCP auth spec asks for, and a JSON body.
+  const raw401 = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  dump('HTTP response without a token', {
+    status: raw401.status,
+    statusText: raw401.statusText,
+    wwwAuthenticate: raw401.headers.get('www-authenticate'),
+    json: await raw401.json(),
+  });
 
   section('2. Viewer token → can read, cannot cancel');
   const viewer = await connectAs('demo-viewer-token');
   console.log('tools:', (await viewer.listTools()).tools.map((t) => t.name));
-  console.log('list  :', text(await viewer.callTool({ name: 'list_appointments', arguments: {} })));
+  const listed = await viewer.callTool({ name: 'list_appointments', arguments: {} });
+  console.log('list  :', text(listed));
   const denied = await viewer.callTool({ name: 'cancel_appointment', arguments: { appointmentId: 'A-101' } });
   console.log('cancel → isError =', denied.isError, '|', text(denied));
+  // Ordinary tools/call results (full shape: post 02), so we only log `isError` and the text. Notice:
+  // list_appointments' text starts with "(for reception-dashboard)": the handler read the caller from
+  // extra.authInfo. The refused cancel has `isError: true`: authorisation failed INSIDE the tool, not
+  // at the HTTP layer.
   await viewer.close();
 
   section('3. Nurse token → allowed');
   const nurse = await connectAs('demo-nurse-token');
   const done = await nurse.callTool({ name: 'cancel_appointment', arguments: { appointmentId: 'A-101' } });
   console.log('cancel → isError =', done.isError ?? false, '|', text(done));
+  // Notice: no `isError` (success), and the text names the caller the server authenticated.
   await nurse.close();
 
   http.close();

@@ -33,12 +33,16 @@ type Alias = 'smart' | 'fast';
 
 /** App code: it knows what KIND of model it needs, not which vendor or version. */
 async function answer(alias: Alias, question: string) {
-  const { text, response } = await generateText({
+  const result = await generateText({
     model: models.languageModel(alias),
     instructions: 'You are a hospital front-desk assistant. Answer in one or two sentences.',
     prompt: question,
     maxOutputTokens: 300,
   });
+  // The full result is in lesson 01, post 00. Here we log `response.modelId` and `steps[0].model.modelId`:
+  // the REAL model behind the alias, so logs and traces still say which model answered.
+  const { text, response } = result;
+  console.log(`alias "${alias}" → response.modelId=${response.modelId}  steps[0].model.modelId=${result.steps[0]!.model.modelId}`);
   return { modelId: response.modelId, text: text.replace(/<think>[\s\S]*?<\/think>/g, '').trim() };
 }
 

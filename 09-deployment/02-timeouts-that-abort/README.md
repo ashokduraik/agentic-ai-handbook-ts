@@ -53,13 +53,21 @@ Post 06's server creates one of these per request.
 ### Step 3 — the fix
 
 ```ts
-    await generateText({ model: model(), prompt, abortSignal: AbortSignal.timeout(TIMEOUT_MS), maxRetries: 0 });
+    const result = await generateText({ model: model(), prompt, abortSignal: AbortSignal.timeout(TIMEOUT_MS), maxRetries: 0 });
+    console.log(`  finished in ${ms() - start} ms (the model was faster than the timeout)`);
+    // Only when the model beat the timeout. Just the fields this post cares about: the full result shape
+    // is in lesson 01, post 00.
+    dump('generateText() result: text and usage', { text: result.text, usage: result.usage });
 ```
 
 ```ts
     // 2. In a server, a timeout becomes 504 Gateway Timeout; anything else stays a 500.
     console.log(`  ${ms() - start} ms: aborted → would answer ${isTimeout(e) ? 504 : 500}  (${(e as Error).name})`);
+    // The error generateText threw. Notice `name: 'TimeoutError'`: that is what isTimeout() looks for.
+    dump('caught error', e);
 ```
+
+`dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)). The `generateText()` result is dumped here as just `text` and `usage`: the [full shape of a `generateText()` result](../../01-foundations-structured-output/00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned) was dumped once in lesson 01, post 00. The caught error is new, so that one is dumped whole.
 
 `maxRetries: 0` matters here: by default the AI SDK retries failed calls, and you don't want a retry after the time is already up.
 
@@ -82,13 +90,29 @@ npm run post:02           # the fix with CHAT_MODEL, asked for an 800-word answe
 Offline:
 
 ```
-[A] 302 ms: caller gave up (timeout)
-    2021 ms: …but the model call kept running and finished anyway: 900 tokens paid for, never read.
-[B] 302 ms: aborted → would answer 504  (TimeoutError)
-    model finished? no: the call was cancelled
+── [A] The trap: Promise.race with a 300 ms timeout ──
+  301 ms: caller gave up (timeout)
+  2020 ms: …but the model call kept running and finished anyway: 900 tokens paid for, never read.
+
+── [B] The fix: abortSignal with a 300 ms timeout ──
+  301 ms: aborted → would answer 504  (TimeoutError)
+▼ caught error
+DOMException { name: 'TimeoutError', message: 'The operation was aborted due to timeout' }
+  (hidden for readability: stack — set SHOW_RAW=1 to print everything)
+  model finished? no: the call was cancelled
 ```
 
-Live on the box (`qwen3:0.6b`): `1510 ms: aborted → would answer 504 (TimeoutError)`.
+The caught error is a `DOMException` named `TimeoutError`, thrown by `AbortSignal.timeout()`. The AI SDK passes it on unchanged, so `isTimeout()` only has to check `name`. A client disconnect would show your own `Error('client disconnected')` here instead, which becomes a 500.
+
+Live on the box (`qwen3:0.6b`), the model did not finish in time, so the same error was dumped and no `generateText() result: text and usage` was printed:
+
+```
+  1505 ms: aborted → would answer 504  (TimeoutError)
+▼ caught error
+DOMException { name: 'TimeoutError', message: 'The operation was aborted due to timeout' }
+```
+
+With a fast model or a higher limit, you get `finished in … ms` and the `text` and `usage` of the result instead.
 
 ## Common gotchas
 

@@ -141,6 +141,12 @@ console.log(app); // { output, metadata: { answerable, citationsValid, sources }
 
 `example.ts` calls both providers exactly as promptfoo does, so you can see what promptfoo will receive before running the suite.
 
+```ts
+if ('output' in grade && grade.output) dump('grade.output, parsed', JSON.parse(grade.output));
+```
+
+The judge provider returns `{ output: '<a JSON string>' }`, because promptfoo wants text back. `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) prints that string parsed, the way promptfoo reads it: `pass` decides the test, `score` (0 to 1) is recorded, and `reason` is what the promptfoo report shows next to a PASS or FAIL.
+
 ### TypeScript providers
 
 ```json
@@ -180,7 +186,34 @@ Results:
 
 Look at the failure: the answer is **correct**. The 0.6B judge failed it with the reason *"the content says children under 12 may not visit the ICU unless approved by the charge nurse"*, which agrees with the answer. That's a **false negative from a weak judge**. promptfoo exits with code 100 when a test fails; that's why CI marks this step `continue-on-error` until your chosen judge passes reliably.
 
-And `npm run post:07` showed another small-model quirk: a correct, cited answer to the ICU question returned with `answerable: false`. The structured fields and the text disagreed. A `javascript` assertion that checks them against each other would catch it (try it below).
+`npm run post:07` with `qwen3:0.6b` shows the opposite mistake (your answer and grade will differ):
+
+```
+── 1. rag-app provider ← "Can a 9 year old visit their grandfather in the ICU?" ──
+{
+  output: 'Yes, a 9-year-old can visit their grandfather in the ICU, provided they are a member of the immediate family and follow the visiting policy. The policy allows visiting hours for immediate family only, with specific times: 11:00–12:00 and 18:00–19:00, and requires hand hygiene and the use of a gown. Children under 12 may visit the ICU unless approved by the charge nurse.',
+  metadata: {
+    answerable: true,
+    citationsValid: true,
+    sources: [ 'visiting-hours.md', 'telehealth.md', 'discharge.md' ]
+  }
+}
+
+── 2. judge provider ← an llm-rubric style prompt ──
+{
+  output: '{"reason":"The response complies with the rubric by stating that children under 12 can visit the ICU only under specific conditions and requiring approval.","pass":true,"score":0.95}'
+}
+▼ grade.output, parsed
+{
+  reason: 'The response complies with the rubric by stating that children under 12 can visit the ICU only under specific conditions and requiring approval.',
+  pass: true,
+  score: 0.95
+}
+```
+
+This time the **answer is wrong** ("Yes, a 9-year-old can visit"), and the judge passed it with `score: 0.95`. A **false positive**. Its `reason` even restates the rule the answer broke. The parsed grade is the place to look: a `pass` that its own `reason` doesn't support means the judge is too weak.
+
+An earlier run of `npm run post:07` showed another small-model quirk: a correct, cited answer to the ICU question returned with `answerable: false`. The structured fields and the text disagreed. A `javascript` assertion that checks them against each other would catch it (try it below).
 
 ## Common gotchas
 

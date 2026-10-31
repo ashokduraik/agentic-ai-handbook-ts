@@ -127,6 +127,14 @@ const good = (text: string) => ({
 
 The split matters: rules go in `instructions` (the AI SDK sends them as the system message), and examples plus the real input go in `messages`. Only the last message changes per request.
 
+The file prints the object `good()` returns, using the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)):
+
+```ts
+dump('good(inbox[0].text) — the options we pass to generateText', shown);
+```
+
+It's a plain options object with two fields. `instructions` is one string (the five lines joined with `\n`). `messages` holds only `user` and `assistant` turns: the two few-shot pairs, then the real input. There is no `system` entry in the array; the SDK adds it from `instructions` when it sends the request.
+
 ### Step 6 — run both on the same inputs
 
 ```ts
@@ -142,6 +150,20 @@ for (const item of inbox) {
 ```
 
 Same model, same `temperature: 0`, same input. The only variable is the prompt. (The output is cut to 90 characters so the vague answers fit on one line.)
+
+### Step 7 — two fields of the result for the good prompt
+
+```ts
+// One more call for the good prompt on the first message, to look at two fields of the result.
+// (We do not dump the whole generateText() result again: post 00 already showed it in full.)
+// `text` is a single word, and `usage.inputTokens` is much larger than for a one-line prompt:
+// the system prompt and the few-shot examples are re-sent (and paid for) on every call.
+const full = await generateText({ model: chatModel(), ...good(inbox[0]!.text), temperature: 0, maxOutputTokens: 400 });
+console.log('\nGood prompt, first message — text:', full.text);
+console.log('usage:', { inputTokens: full.usage.inputTokens, outputTokens: full.usage.outputTokens });
+```
+
+One more call, so you can see two fields for the good prompt. `text` is a single word, `'URGENT'`, so your code can compare it directly. `usage.inputTokens` is about 148, against roughly 20–30 for a one-line prompt: the system prompt and the few-shot examples are sent, and paid for, **on every call**. That is the price of a good prompt, and usually worth it. We saw the full `generateText()` result in [post 00](../00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned).
 
 ---
 
@@ -161,7 +183,58 @@ npm run post:04           # runs vague vs. good prompt on 3 messages (calls your
 - **Part B**, for each of the three inbox messages:
   - **vague** gives a long, chatty paragraph (cut short in the printout);
   - **good** gives exactly `URGENT`, `ADMIN` or `ROUTINE`, which your code can use directly.
+- After the loop, the `text` and a small `usage` object for the good prompt on the first message.
 - Small models sometimes label the knee message `URGENT` instead of `ROUTINE`. The format is still clean (one word), and the grey-zone rule pushed it towards caution. Whether that is acceptable is a question for evals (lesson 05).
+
+A real run with a small `qwen3:0.6b` (trimmed at `…`):
+
+```
+── [A] The good prompt, as the list of messages the model receives
+system   | You are a triage assistant for a hospital patient portal.
+         | Sort each patient message into exactly one category.
+         | …
+user     | I fainted twice this morning and feel dizzy
+assistant| URGENT
+user     | Please update my phone number on file
+assistant| ADMIN
+user     | My father has crushing chest pain and is sweating a lot right now
+▼ good(inbox[0].text) — the options we pass to generateText
+{
+  instructions: 'You are a triage assistant for a hospital patient portal.\n' +
+    'Sort each patient message into exactly one category.\n' +
+    …
+    'Reply with the category word only, nothing else.',
+  messages: [
+    { role: 'user', content: 'I fainted twice this morning and feel dizzy' },
+    { role: 'assistant', content: 'URGENT' },
+    { role: 'user', content: 'Please update my phone number on file' },
+    { role: 'assistant', content: 'ADMIN' },
+    {
+      role: 'user',
+      content: 'My father has crushing chest pain and is sweating a lot right now'
+    }
+  ]
+}
+
+── [B] Vague vs. good prompt on the same three messages ────────
+
+Message:  "My father has crushing chest pain and is sweating a lot right now"   (expected URGENT)
+  vague → It's important to consult a healthcare professional immediately. Chest pain can be a sign
+  good  → URGENT
+
+Message:  "Can I get a copy of my last invoice for insurance?"   (expected ADMIN)
+  vague → You're asking for a copy of your last insurance invoice. This is a general request, and it
+  good  → ADMIN
+
+Message:  "My knee still aches a bit after physio, should I book a follow-up?"   (expected ROUTINE)
+  vague → It depends on several factors, so I'll break down your thoughts: 1. **If the pain is mild
+  good  → URGENT
+
+Good prompt, first message — text: URGENT
+usage: { inputTokens: 148, outputTokens: 4 }
+```
+
+The vague answers, ids and exact token counts will differ on your machine; the one-word answers from the good prompt should not (apart from the knee message, as noted above).
 
 ## Common gotchas
 

@@ -13,7 +13,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateText } from 'ai';
-import { chatModel, modelLabel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, modelLabel, section, stripThinking } from '@learn/shared';
 import { DOCS_DIR } from '../pipeline/rag.ts';
 
 const question = 'How many no-shows before a deposit is required, and how much is the deposit?';
@@ -28,8 +28,12 @@ async function ask(label: string, instructions: string, prompt: string) {
   section(label);
   console.log(`prompt size: ${prompt.length} chars (~${Math.round(prompt.length / 4)} tokens)`); // ~4 chars per token
   if (offline) return;
-  const { text } = await generateText({ model: chatModel(), instructions, prompt, temperature: 0, maxOutputTokens: 600 });
-  console.log('answer:', stripThinking(text));
+  const result = await generateText({ model: chatModel(), instructions, prompt, temperature: 0, maxOutputTokens: 600 });
+  // Only the field this post cares about (the full generateText result is in lesson 01, post 00).
+  // Notice `usage.inputTokens`: compare it across A, B and C. B pays for every document on every
+  // question; C pays for one section.
+  console.log('usage.inputTokens:', result.usage.inputTokens);
+  console.log('answer:', stripThinking(result.text));
 }
 
 console.log(`Question: ${question}   (model: ${modelLabel()})`);
@@ -51,6 +55,9 @@ const words = (t: string) => new Set(t.toLowerCase().match(/[a-z]{4,}/g) ?? []);
 const overlap = (s: { text: string }) => [...words(question)].filter((w) => words(s.text).has(w)).length;
 const best = sections.sort((a, b) => overlap(b) - overlap(a))[0]!; // crude! posts 03-06 do this properly
 console.log(`\nretrieved: ${best.source} → "${best.text.split('\n')[0]}"`);
+// The whole retrieved "hit": just { source, text }. Notice the text is ONE section, not a whole file,
+// and that `source` is all we would need to cite it.
+dump('retrieved section', { ...best, overlap: overlap(best) });
 await ask(
   'C. Retrieve the relevant section, then generate',
   'Answer in one sentence using ONLY the source. If it does not contain the answer, say so.',

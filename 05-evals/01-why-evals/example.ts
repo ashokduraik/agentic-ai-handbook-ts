@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { embed } from 'ai';
 import { DOCS_DIR, HybridStore, chunkMarkdown, ingestDir, llmRerank, type Hit } from '@learn/rag';
 import { fakeEmbed, fakeJudge } from '@learn/rag/offline-fakes';
-import { chatModel, embeddingModel, modelLabel, section } from '@learn/shared';
+import { chatModel, dump, embeddingModel, modelLabel, section } from '@learn/shared';
 import { cases } from '../02-golden-dataset/dataset.ts';
 
 const offline = process.argv.includes('--offline');
@@ -41,9 +41,21 @@ for (const c of answerable) {
     score[mode].hit3 += Number(hit(hits, c.expectedSource!, 3));
   }
   console.log(`  ${c.id.padEnd(24)} none: ${candidates[0]?.source.padEnd(28)} llm: ${reranked[0]?.source}`);
+  if (c === answerable[0]) {
+    // Both rankings for the FIRST question only, as `score  heading` lines (the full `Hit` shape is in
+    // lesson 04, posts 04-06). Notice `score`: RRF before reranking, 0-10 after. hit@k only asks whether
+    // c.expectedSource is among the first k hits.
+    const brief = (hits: Hit[]) => hits.forEach((h, i) => console.log(`      ${i + 1}. ${h.score.toFixed(3)}  ${h.heading}`));
+    console.log(`    hybrid candidates (expected: ${c.expectedSource}):`);
+    brief(candidates);
+    console.log('    llmRerank() top 3:');
+    brief(reranked);
+  }
 }
 
 section('The numbers');
+// The raw counts behind the table: how many of the questions had the right doc at rank 1 / in the top 3.
+dump('hit counts', { questions: answerable.length, ...score });
 const pct = (n: number) => `${Math.round((100 * n) / answerable.length)}%`;
 console.table({
   'RERANKER=none': { 'hit@1': pct(score.none.hit1), 'hit@3': pct(score.none.hit3) },

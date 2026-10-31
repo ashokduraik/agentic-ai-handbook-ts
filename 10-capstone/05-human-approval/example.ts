@@ -8,7 +8,7 @@
  */
 import { generateText, stepCountIs, type LanguageModel } from 'ai';
 import { scriptedModel } from '@learn/07-observability/mock';
-import { chatModel, modelLabel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, modelLabel, section, stripThinking } from '@learn/shared';
 import { connectFhirServer } from '../02-the-mcp-server/connect.ts';
 import { ROLE_TOOLS, wrapTool, type Session } from '../04-least-privilege/access.ts';
 import { approvalPolicy, writeToolsOf } from './approval.ts';
@@ -46,6 +46,11 @@ for (const approveWrites of [false, true]) {
       temperature: 0,
     });
 
+    // The full generateText() result shape is in lesson 01, posts 00 and 08; tool-approval-response was dumped in
+    // lesson 06, post 08. Only that part is dumped here, and only in [A]: Notice approved: false and your `reason`,
+    // and that the booking never produced a tool-result. [B]'s approved booking is shown by the summary lines and the store below.
+    if (!approveWrites) dump('generateText() result: the tool-approval-response part of content', r.content.find((p) => p.type === 'tool-approval-response'));
+
     for (const step of r.steps)
       for (const p of step.content as { type: string; toolName?: string; approved?: boolean; reason?: string; toolCall?: { toolName: string } }[]) {
         if (p.type === 'tool-call') console.log(`  call      ${p.toolName}`);
@@ -55,6 +60,7 @@ for (const approveWrites of [false, true]) {
 
     // 4. Check the outcome in the store, not in the answer text.
     const booked = await raw.list_appointments!.execute!({ patientId: 'P-001' }, { toolCallId: 'check', messages: [], context: {} });
+    // The store's truth, whatever the answer text claimed (the result is a normal MCP tool result: post 02).
     console.log('  store:   ', (booked as { content: { text: string }[] }).content[0]!.text);
   } finally {
     await mcp.close();

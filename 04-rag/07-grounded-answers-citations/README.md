@@ -115,6 +115,18 @@ const a = await answer(q, contexts, offline ? cannedModel(offlineReply) : undefi
 
 With `--offline`, a fake model returns a canned JSON reply, so you can see the code path without Ollama.
 
+```ts
+dump('answer() result', a);
+```
+
+`dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)) prints everything `answer()` returns. It merges three things into one object:
+
+| Field | Comes from | What to check |
+|---|---|---|
+| `answer`, `citations`, `answerable` | the model's structured output (`GroundedAnswer`) | Does `answer` agree with the source it cites? |
+| `citationsValid`, `invalidCitations` | our `checkCitations()` | Numbers in `citations` **or** in the text like `[7]` that point at no source. |
+| `contexts` | the hits you passed in | The sources in order: citation `[1]` means `contexts[0]`. Keep them to show next to the answer. |
+
 ---
 
 ## Run it
@@ -158,6 +170,36 @@ The refusal works. Notice the odd detail, though: a refusal that cites all three
 Notice also that retrieval for the parking question still returned three chunks: search always returns *something*. Only the answer step can say "not here".
 
 With the tiny `qwen3:0.6b`, the deposit answer was long and rambling, yet it still passed `citationsValid` because it cited [1, 2]. A valid citation is not a correct answer: that's what faithfulness evals in lesson 05 catch.
+
+Another `qwen3:0.6b` run, with the full `answer()` result (trimmed at `…`):
+
+```
+  answer (ollama:qwen3:0.6b): 2, 100
+  answerable=true  citations=[1]  citationsValid=true
+▼ answer() result
+{
+  answer: '2, 100',
+  citations: [ 1 ],
+  answerable: true,
+  citationsValid: true,
+  invalidCitations: [],
+  contexts: [
+    {
+      id: 'appointment-cancellation.md#1',
+      source: 'appointment-cancellation.md',
+      heading: 'Outpatient Appointment Cancellation Policy (fictional) › Late cancellations and no-shows',
+      text: 'A cancellation within 24 hours, or not attending, counts as a no-show. After three no-shows within 12 months, the patient must book through the call centre only and a SAR 100 deposit is required for each new booking.',
+      score: 0.03252247488101534
+    },
+    …
+  ]
+}
+…
+  answer (ollama:qwen3:0.6b): answerable=false
+  answerable=false  citations=[]  citationsValid=true
+```
+
+Put `answer` next to `contexts[0].text` and the problem jumps out: the source says **three** no-shows, the model said **2**. Every check in code still passed. The parking refusal this time cited nothing, but its `answer` text was literally `'answerable=false'`: the model put a field name in the wrong field.
 
 ## Common gotchas
 

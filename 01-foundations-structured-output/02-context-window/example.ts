@@ -11,10 +11,12 @@
  */
 import { generateText, type ModelMessage } from 'ai';
 import { getEncoding } from 'js-tiktoken';
-import { chatModel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, section, stripThinking } from '@learn/shared';
 
 const tokenizer = getEncoding('o200k_base');
-// Each message costs its text plus a few tokens for the role label; ~4 is a common estimate.
+// Each message costs its text PLUS a few hidden tokens: the chat template wraps every message with
+// markers and a role label (Qwen: <|im_start|>user\n … <|im_end|>\n). ~4 is a common rough estimate;
+// it is a budget, not a bill, so leave a safety margin when the budget is tight. (See the README, Step 1.)
 const tokensOf = (m: ModelMessage) => tokenizer.encode(String(m.content)).length + 4;
 
 // ---------------------------------------------------------------------------
@@ -56,6 +58,11 @@ console.log(`After:  ${fitted.length} messages ≈ ${sum(fitted)} tokens`);
 console.log('Kept first :', fitted[0]!.content);
 console.log('Then a note:', fitted[1]!.content);
 
+// The raw return value of fitToBudget(): an ordinary ModelMessage[] — exactly what you would pass
+// as `messages`. Notice: the system message, then our "omitted" note (role 'user'), then the
+// newest turns, oldest first. (Only the first 3 are printed; the rest look like the third.)
+dump(`fitToBudget() result — first 3 of ${fitted.length} messages`, fitted.slice(0, 3));
+
 if (process.argv.includes('--offline')) process.exit(0);
 
 // ---------------------------------------------------------------------------
@@ -69,6 +76,9 @@ const question: ModelMessage = { role: 'user', content: 'Who is in bed 12? Answe
 // Call 1 — only the question. The model never saw "Rahul" in THIS call.
 const withoutHistory = await generateText({ model: chatModel(), messages: [question], maxOutputTokens: 300, temperature: 0 });
 console.log('Without history:', stripThinking(withoutHistory.text));
+// `usage.inputTokens` = how many tokens we sent. Here only the question was sent, so it is small.
+// (The full generateText() result was shown in post 00, so we only print the field we want to compare.)
+console.log('Input tokens without history:', withoutHistory.usage.inputTokens);
 
 // Call 2 — the same question, but we send the earlier turns along with it.
 const withHistory = await generateText({
@@ -78,3 +88,8 @@ const withHistory = await generateText({
   temperature: 0,
 });
 console.log('With history:   ', stripThinking(withHistory.text));
+// Compare `usage.inputTokens` with the call above. It is larger, because we re-sent the earlier
+// turns — memory is paid for in input tokens on every call.
+// (In the full result, `response.messages` holds the assistant turn you would append to the history
+// for the next call; see post 00 for the whole object.)
+console.log('Input tokens with history:   ', withHistory.usage.inputTokens);

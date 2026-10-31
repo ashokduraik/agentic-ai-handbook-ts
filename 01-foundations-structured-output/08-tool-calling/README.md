@@ -120,6 +120,17 @@ result.steps.forEach((step, i) => {
 
 `result.steps` is your debugger for tool loops. Each step shows what the model asked for, what your code returned, and why the step ended.
 
+The lines above print a summary. Next the file dumps the **raw** tool-call and tool-result objects of each step, with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)):
+
+```ts
+result.steps.forEach((step, i) => {
+  dump(`steps[${i}].toolCalls`, step.toolCalls);
+  dump(`steps[${i}].toolResults`, step.toolResults);
+});
+```
+
+A **tool call** is `{ type: 'tool-call', toolCallId, toolName, input }`: the model's request, with the `input` it chose (already checked against your `inputSchema`). A **tool result** is `{ type: 'tool-result', toolCallId, toolName, input, output, dynamic }`: `output` is exactly what your `execute` returned. Match them up by **`toolCallId`**. When a model asks for several tools in one step, that id is how each result finds its request. (`dynamic: false` means the tool was declared in code, as here; tools discovered at runtime, such as MCP tools in lesson 03, are "dynamic".)
+
 ### Step 5 — check the answer
 
 ```ts
@@ -128,6 +139,23 @@ console.log('Correct: 1 + 8 = 9 free beds   ← compare! Small models can still 
 ```
 
 The tool gives the model the right facts; it does not guarantee right reasoning. Printing the correct answer next to the model's makes that visible.
+
+### Step 6 — the full result of a tool loop
+
+```ts
+section('[D] The full result object');
+dump('generateText() result with tools', result);
+```
+
+This is the same result object as in [post 03](../03-model-calls-and-streaming/README.md), but now several fields are no longer empty, and it matters which ones describe the **whole loop** and which only the **last step**:
+
+| Field | With tools |
+|---|---|
+| `steps` | One entry per model call: 3 in the run below (ask ICU → ask cardiology → answer). Each has its own `finishReason` (`'tool-calls'`, then `'stop'`), `usage`, `content`, and a `performance.toolExecutionMs` entry timing your `execute`. |
+| `content` | The parts of **all** steps in order: `tool-call`, `tool-result`, `tool-call`, `tool-result`, `text`. |
+| `toolCalls` / `toolResults` | Every call and result from **all** steps. |
+| `text`, `finishReason`, `response` | From the **last** step only, the one that wrote the answer. |
+| `usage` / `totalUsage` | The sum over **all** steps (687 input tokens here, against 185 for the first step alone). Every step re-sends the conversation so far, tool results included, so a tool loop costs much more than one call. |
 
 ---
 
@@ -148,6 +176,100 @@ npm run post:08
   - Step 2 has `finishReason=stop`.
 - **Part C**: the model's answer next to the correct one (1 + 8 = 9). If they differ, you have just seen why calculations belong in code.
 - With a very small `CHAT_MODEL` you may see only **one** tool call (ICU) and an invented number for cardiology, despite "Never guess numbers". That is exactly the failure this post warns about; a larger model usually calls the tool once per ward.
+
+A real run with a small `qwen3:0.6b` (trimmed at `…`):
+
+```
+── [A] The model asks for tools; the SDK runs them and loops ───
+  ↳ your code ran getBedOccupancy("icu")
+  ↳ your code ran getBedOccupancy("cardiology")
+
+── [B] Step by step ────────────────────────────────────────────
+Step 1 (finishReason=tool-calls)
+   model asked:   getBedOccupancy({"ward":"icu"})
+   code returned: {"ward":"icu","free":1}
+Step 2 (finishReason=tool-calls)
+   model asked:   getBedOccupancy({"ward":"cardiology"})
+   code returned: {"ward":"cardiology","free":8}
+Step 3 (finishReason=stop)
+▼ steps[0].toolCalls
+[
+  {
+    type: 'tool-call',
+    toolCallId: 'call_xqgr42tp',
+    toolName: 'getBedOccupancy',
+    input: { ward: 'icu' }
+  }
+]
+▼ steps[0].toolResults
+[
+  {
+    type: 'tool-result',
+    toolCallId: 'call_xqgr42tp',
+    toolName: 'getBedOccupancy',
+    input: { ward: 'icu' },
+    output: { ward: 'icu', free: 1 },
+    dynamic: false
+  }
+]
+▼ steps[1].toolCalls
+…
+▼ steps[2].toolCalls
+[]
+▼ steps[2].toolResults
+[]
+
+── [C] Final answer ────────────────────────────────────────────
+Model:   In ICU, there are 1 free bed, and in cardiology, there are 8 free beds combined.
+Correct: 1 + 8 = 9 free beds   ← compare! Small models can still get the arithmetic wrong.
+
+── [D] The full result object ──────────────────────────────────
+▼ generateText() result with tools
+DefaultGenerateTextResult {
+  finalStep: [same as the last item of steps],
+  content: [
+    { type: 'tool-call', toolCallId: 'call_xqgr42tp', toolName: 'getBedOccupancy', input: { ward: 'icu' } },
+    { type: 'tool-result', toolCallId: 'call_xqgr42tp', toolName: 'getBedOccupancy', input: { ward: 'icu' }, output: { ward: 'icu', free: 1 }, dynamic: false },
+    { type: 'tool-call', toolCallId: 'call_m84cm5pi', … input: { ward: 'cardiology' } },
+    { type: 'tool-result', toolCallId: 'call_m84cm5pi', … output: { ward: 'cardiology', free: 8 }, dynamic: false },
+    { type: 'text', text: 'In ICU, there are 1 free bed, and in cardiology, there are 8 free beds combined.' }
+  ],
+  text: 'In ICU, there are 1 free bed, and in cardiology, there are 8 free beds combined.',
+  …
+  toolCalls: [ { type: 'tool-call', toolCallId: 'call_xqgr42tp', … }, { type: 'tool-call', toolCallId: 'call_m84cm5pi', … } ],
+  …
+  toolResults: [ { type: 'tool-result', toolCallId: 'call_xqgr42tp', … }, { type: 'tool-result', toolCallId: 'call_m84cm5pi', … } ],
+  …
+  finishReason: 'stop',
+  …
+  usage: { inputTokens: 687, inputTokenDetails: {}, outputTokens: 70, outputTokenDetails: {}, totalTokens: 757 },
+  …
+  steps: [
+    DefaultStepResult {
+      text: '',
+      …
+      stepNumber: 0,
+      …
+      finishReason: 'tool-calls',
+      rawFinishReason: 'tool_calls',
+      usage: { inputTokens: 185, … outputTokens: 24, … totalTokens: 209 },
+      performance: {
+        effectiveOutputTokensPerSecond: 48.33,
+        effectiveTotalTokensPerSecond: 420.88,
+        stepTimeMs: 502.34,
+        responseTimeMs: 496.58,
+        toolExecutionMs: { call_xqgr42tp: 0.21990100000004986 }
+      },
+      …
+    },
+    DefaultStepResult { … stepNumber: 1, … finishReason: 'tool-calls', … usage: { inputTokens: 229, … } … },
+    DefaultStepResult { … stepNumber: 2, … finishReason: 'stop', … usage: { inputTokens: 273, … } … }
+  ],
+  totalUsage: { inputTokens: 687, … outputTokens: 70, … totalTokens: 757 }
+}
+```
+
+Your tool-call ids, token counts and timings will differ. This small model called the tools one per step (some models ask for both wards in a single step, and then there are only two steps) and got the facts right, but its final sentence never actually added them up to 9.
 
 ## Common gotchas
 

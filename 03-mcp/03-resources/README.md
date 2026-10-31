@@ -88,13 +88,30 @@ The `list` callback is optional. With it, `resources/list` shows every patient's
 ### Step 3 — the client reads them
 
 ```ts
-for (const r of (await client.listResources()).resources) console.log(`resource  ${r.uri.padEnd(32)} ${r.name}`);
-for (const t of (await client.listResourceTemplates()).resourceTemplates) console.log(`template  ${t.uriTemplate}`);
+const listedResources = await client.listResources();
+const listedTemplates = await client.listResourceTemplates();
+for (const r of listedResources.resources) console.log(`resource  ${r.uri.padEnd(32)} ${r.name}`);
+for (const t of listedTemplates.resourceTemplates) console.log(`template  ${t.uriTemplate}`);
 ```
 
 ```ts
 const fatima = await client.readResource({ uri: 'patient://P-001/appointments' });
 ```
+
+Each of these results is also printed whole, with the toolkit's `dump()` ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)):
+
+```ts
+dump('client.listResources() result', listedResources);
+dump('client.listResourceTemplates() result', listedTemplates);
+```
+
+```ts
+dump('client.readResource(patient://P-001/appointments) result', fatima);
+```
+
+- **`listResources()`** returns `{ resources: [...] }` with `name`, `title`, `uri`, `mimeType` (and `description` if you gave one). It lists the static resource **and** the concrete URIs that the template's `list` callback produced, one per patient. Without that callback, the patients wouldn't appear here at all.
+- **`listResourceTemplates()`** returns the pattern itself: `uriTemplate: 'patient://{patientId}/appointments'`.
+- **`readResource()`** returns `{ contents: [...] }`, a **list**, because one read may return several parts. Each part has the concrete `uri` you asked for and the data in `text` (binary data would come as base64 in `blob`). Here the text is a JSON **string**: MCP doesn't parse it for you.
 
 ### Step 4 — how a host uses it
 
@@ -133,6 +150,51 @@ patient://P-001/appointments → [{"id":"A-101","patientId":"P-001","slotId":"S-
 ```
 
 …followed by the prompt a host would send to its model.
+
+The dumps, from a real run (no model, so yours will match; trimmed at `…`):
+
+```
+▼ client.listResources() result
+{
+  resources: [
+    {
+      name: 'departments',
+      title: 'Departments',
+      uri: 'clinic://departments',
+      description: 'Departments and opening hours',
+      mimeType: 'application/json'
+    },
+    {
+      name: 'Fatima Al-Harbi appointments',
+      title: 'Appointments of a patient',
+      uri: 'patient://P-001/appointments',
+      mimeType: 'application/json'
+    },
+    …
+  ]
+}
+▼ client.listResourceTemplates() result
+{
+  resourceTemplates: [
+    {
+      name: 'patient-appointments',
+      title: 'Appointments of a patient',
+      uriTemplate: 'patient://{patientId}/appointments',
+      mimeType: 'application/json'
+    }
+  ]
+}
+…
+▼ client.readResource(patient://P-001/appointments) result
+{
+  contents: [
+    {
+      uri: 'patient://P-001/appointments',
+      text: '[{"id":"A-101","patientId":"P-001","slotId":"S-1","reason":"chest pain follow-up","status":"booked"}]'
+    }
+  ]
+}
+```
 
 ## Common gotchas
 

@@ -13,7 +13,7 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { generateText, registerTelemetry, stepCountIs, tool, type LanguageModel } from 'ai';
 import { OpenTelemetry } from '@ai-sdk/otel';
 import { z } from 'zod';
-import { chatModel, env, section } from '@learn/shared';
+import { chatModel, dump, env, section } from '@learn/shared';
 import { setupTracing } from '../01-traces-and-spans/tracing.ts';
 import { scriptedModel } from '../support/mock.ts';
 
@@ -48,6 +48,9 @@ async function handleRequest(requestId: string, question: string, model: Languag
         //    With real patient data also pass recordInputs: false, recordOutputs: false.
         telemetry: { functionId: 'wait-time-bot' },
       });
+      // The full generateText result is in lesson 01, post 00 (with tools: post 08). Here we log just what
+      // maps to spans: each step becomes its own AI SDK span, and `totalUsage` is what the top span records.
+      console.log(`steps=${r.steps.length} stepFinishReasons=${r.steps.map((s) => s.finishReason).join(',')} totalUsage in/out=${r.totalUsage.inputTokens}/${r.totalUsage.outputTokens}`);
       span.setAttribute('app.steps', r.steps.length);
       return r.text;
     } catch (e) {
@@ -77,6 +80,10 @@ if (tracing.memory) {
     const toolName = s.attributes['gen_ai.tool.name'] ? ` tool=${s.attributes['gen_ai.tool.name']}` : '';
     console.log(`${'   '.repeat(depth(s))}${s.name}${toolName}${usage}`);
   }
+  // The attributes the AI SDK wrote on its spans, one object per span (the console exporter only
+  // shows a few). Notice the gen_ai.* names from post 02, functionId as gen_ai.agent.name, and the full
+  // prompt, tool definitions and answer (gen_ai.*.messages): recorded unless recordInputs/recordOutputs: false.
+  dump('AI SDK span attributes', spans.filter((s) => s !== root).map((s) => ({ name: s.name, attributes: s.attributes })));
   const children = spans.filter((s) => s.spanContext().traceId === root.spanContext().traceId && s !== root);
   const hasTool = children.some((s) => s.attributes['gen_ai.tool.name'] === 'getWaitTime');
   const hasUsage = children.some((s) => typeof s.attributes['gen_ai.usage.input_tokens'] === 'number');

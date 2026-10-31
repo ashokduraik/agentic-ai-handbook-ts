@@ -6,7 +6,7 @@
  *
  * Run: npx tsx 03-code-checks/example.ts
  */
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 import { cases } from '../02-golden-dataset/dataset.ts';
 import { codeChecks, containsAny, type AppResult } from './checks.ts';
 
@@ -50,8 +50,15 @@ const examples: { label: string; id: string; result: AppResult }[] = [
   },
 ];
 
+const shown = new Set<string>();
 for (const { label, id, result } of examples) {
   section(`${id}: ${label}`);
+  if (!shown.has(id)) {
+    shown.add(id);
+    // The golden case these answers are checked against (once per case). Notice which fields are
+    // missing: a check whose field is absent returns null ("doesn't apply"), not true.
+    dump(`golden case ${id}`, byId(id));
+  }
   console.log(`  "${result.answer}"`);
   console.log(`  ${JSON.stringify(codeChecks(byId(id), result))}`);
 }

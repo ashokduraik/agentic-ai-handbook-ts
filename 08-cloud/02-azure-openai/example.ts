@@ -14,7 +14,7 @@
  */
 import { createAzure } from '@ai-sdk/azure';
 import { generateText } from 'ai';
-import { chatModel, env, section } from '@learn/shared';
+import { chatModel, dump, env, section } from '@learn/shared';
 import { captureFetch, mask, type CapturedRequest } from '../support/fakes.ts';
 
 const show = (r: CapturedRequest) =>
@@ -31,10 +31,15 @@ section('[A1] Key auth, Responses API (the default)');
 const azure = createAzure({ resourceName: 'contoso-health-ai', apiKey: 'demo-key-0000-not-real', fetch });
 await generateText({ model: azure('triage-prod'), prompt: 'Hello', maxRetries: 0 }).catch(() => {});
 show(requests.at(-1)!);
+// The whole JSON body Azure would receive (Responses API). Notice `model` is the deployment name and the
+// prompt arrives as `input`, a list of messages.
+dump('request body (Responses API)', requests.at(-1)!.body);
 
 section('[A2] Chat Completions API (older deployments and some regions)');
 await generateText({ model: azure.chat('triage-prod'), prompt: 'Hello', maxRetries: 0 }).catch(() => {});
 show(requests.at(-1)!);
+// The same call through Chat Completions: notice the prompt now arrives as `messages` instead of `input`.
+dump('request body (Chat Completions)', requests.at(-1)!.body);
 
 section('[A3] Entra ID (managed identity): a token instead of a key');
 // In production: import { DefaultAzureCredential, getBearerTokenProvider } from '@azure/identity';
@@ -50,6 +55,10 @@ if (env.provider !== 'azure') {
   console.log(`\n[B] skipped: AI_PROVIDER is "${env.provider}". Set AI_PROVIDER=azure and AZURE_* in .env to call Azure for real.`);
 } else {
   section('[B] A real call to your Azure deployment');
-  const { text, usage } = await generateText({ model: chatModel(), prompt: 'In one sentence: what is triage?', maxOutputTokens: 200 });
+  const result = await generateText({ model: chatModel(), prompt: 'In one sentence: what is triage?', maxOutputTokens: 200 });
+  // The full result has the same fields as on Ollama (lesson 01, post 00). Log only the Azure-specific
+  // parts: `response.modelId` (the model behind your deployment) and the provider adapter that ran.
+  console.log('response.modelId:', result.response.modelId, '  steps[0].model.provider:', result.steps[0]!.model.provider);
+  const { text, usage } = result;
   console.log(text, usage);
 }

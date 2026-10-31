@@ -11,7 +11,7 @@
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { section } from '@learn/shared';
+import { dump, section } from '@learn/shared';
 import { serverProcess } from './spawn.ts';
 
 const client = new Client({ name: 'inspect-client', version: '1.0.0' });
@@ -23,6 +23,13 @@ for (const t of tools) console.log(`tool  ${t.name.padEnd(20)} hints=${JSON.stri
 for (const r of (await client.listResources()).resources) console.log(`res   ${r.uri}`);
 for (const r of (await client.listResourceTemplates()).resourceTemplates) console.log(`tmpl  ${r.uriTemplate}`);
 for (const p of (await client.listPrompts()).prompts) console.log(`prompt ${p.name}`);
+// The handshake result from the OTHER process. Notice: this server lists `tools`, `resources` AND
+// `prompts` in its capabilities; the post 01 server only had `tools`.
+dump('client.getServerCapabilities()', client.getServerCapabilities());
+// One tool definition as it crossed the pipe (full listTools shape: post 01). Notice: `inputSchema`
+// (JSON Schema) and `outputSchema` survive the trip, so a host can see them without importing your code.
+const searchSlots = tools.find((t) => t.name === 'search_slots');
+console.log('search_slots inputSchema.required:', JSON.stringify(searchSlots?.inputSchema.required), '| has outputSchema:', !!searchSlots?.outputSchema);
 
 section('Call tools in another process');
 const slots = await client.callTool({ name: 'search_slots', arguments: { department: 'cardiology' } });
@@ -31,6 +38,8 @@ const booked = await client.callTool({ name: 'book_appointment', arguments: { pa
 console.log('book:', JSON.stringify(booked.content));
 const again = await client.callTool({ name: 'book_appointment', arguments: { patientId: 'P-002', slotId: 'S-1', reason: 'x' } });
 console.log('double-book → isError =', again.isError, JSON.stringify(again.content));
+// Notice: these tools/call results look exactly like the in-memory ones in post 02 (full shapes
+// there) — the transport changed, the protocol did not.
 
 section('Bad arguments are rejected by the server-side schema');
 const bad = await client.callTool({ name: 'search_slots', arguments: { department: 'dermatology' } });
@@ -44,5 +53,6 @@ const prompt = await client.getPrompt({
   arguments: { patientName: 'Fatima', when: '3 Nov 09:30', doctor: 'Dr. Qureshi' },
 });
 console.log('prompt →', JSON.stringify(prompt.messages[0]?.content));
+// Same resources/read and prompts/get shapes as in posts 03 and 04 (full results there).
 
 await client.close(); // also stops the server child process

@@ -38,7 +38,7 @@ for (const name of NEEDS[env.provider] ?? []) {
 if (process.argv.includes('--offline') || process.argv.includes('--dry')) process.exit(0);
 
 section('[B] Structured output through whichever provider is active');
-const { output, usage } = await generateText({
+const result = await generateText({
   model: chatModel(), // ← the ONLY place a model appears, and it comes from .env
   output: Output.object({
     schema: z.object({ department: z.enum(['cardiology', 'orthopedics', 'general']), urgent: z.boolean() }),
@@ -46,8 +46,14 @@ const { output, usage } = await generateText({
   maxOutputTokens: 1024,
   prompt: 'Triage: "crushing chest pain for 20 minutes". Return the department and whether it is urgent.',
 });
+// The full result is in lesson 01, post 00 (structured output: post 07). Log only the provider-specific
+// parts: `response.modelId` and `steps[0].model.provider`.
+console.log('response.modelId:', result.response.modelId, '  steps[0].model.provider:', result.steps[0]!.model.provider);
+const { output, usage } = result;
 console.log(output, usage);
 
 section('[B] Embeddings through the same abstraction');
-const { embedding } = await embed({ model: embeddingModel(), value: 'appointment cancellation policy' });
+const embedded = await embed({ model: embeddingModel(), value: 'appointment cancellation policy' });
+// The full embed() result is in lesson 01, post 06. We only need the vector's size: it depends on the model.
+const { embedding } = embedded;
 console.log(`dimensions=${embedding.length} (changes per provider → re-index your vector store when you switch!)`);

@@ -68,6 +68,20 @@ registerTelemetry(new OpenTelemetry({ tracer: tracing.tracer })); // the AI SDK 
 await tracing.shutdown(); // 3. Always flush before exit, or the last spans are lost.
 ```
 
+### Step 4 — the root span
+
+The result of `ask()` is not dumped here: its shape is dumped in [post 06](../06-the-agent/README.md#step-5--seeing-the-results), and the example prints just the `answer`. The trace shows the same run, step by step. A span's full shape (ids, times, resource, scope) was dumped in [lesson 07, post 01](../../07-observability/01-traces-and-spans/README.md#step-4b--print-the-whole-span), so the root span is dumped here with only the fields this post is about: its `name`, the `attributes` the agent set, and `status`. The duration is already in the tree. `dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)).
+
+```ts
+  // The root span: only the fields this post is about. Notice the app.* attributes the agent set (user, role,
+  // steps, tool_calls, denied, forbidden) and `status`. The full span shape (ids, times, resource, scope) was
+  // dumped in lesson 07, post 01; the duration is already in the tree above.
+  const root = spans.find((s) => s.name === 'agent.ask')!;
+  dump('the agent.ask span: name, attributes and status', { name: root.name, attributes: root.attributes, status: root.status });
+```
+
+The span dump only runs when spans are kept in memory (offline, or `TRACE_EXPORTER=memory`).
+
 ---
 
 ## Run it
@@ -83,7 +97,7 @@ TRACE_EXPORTER=otlp npm run post:07     # to Jaeger: start it with lesson 07's d
 
 ### What you should see
 
-Offline (timings vary):
+Offline (timings vary). The run prints the answer, then the tree and the root span:
 
 ```
 agent.ask  33 ms  user=staff-17 role=receptionist approve_writes=true steps=4 tool_calls=3 denied=0 forbidden=0
@@ -99,7 +113,30 @@ agent.ask  33 ms  user=staff-17 role=receptionist approve_writes=true steps=4 to
       execute_tool book_appointment  1 ms  tool.name=book_appointment
     step 4  0 ms
       chat scripted  0 ms  usage.input_tokens=42 usage.output_tokens=7
+▼ the agent.ask span: name, attributes and status
+{
+  name: 'agent.ask',
+  attributes: {
+    'app.user': 'staff-17',
+    'app.role': 'receptionist',
+    'app.approve_writes': true,
+    'app.steps': 4,
+    'app.tool_calls': 3,
+    'app.denied': 0,
+    'app.forbidden': 0
+  },
+  status: { code: 0 }
+}
 ```
+
+| Field | What it tells you |
+|---|---|
+| `attributes` | Only the `app.*` keys the agent set itself; the `gen_ai.*` keys are on the child spans. |
+| `status.code` | `0` means UNSET, the normal value for a span that didn't fail. `agent.ts` sets `2` (ERROR) when `ask()` throws. |
+
+The span's `duration`, `resource` and `startTime`/`endTime` are left out of the dump on purpose (they were explained in lesson 07, post 01): the duration is the `33 ms`-style number in the tree.
+
+Live with `TRACE_EXPORTER=memory` (`qwen3:0.6b`), an earlier run's span showed `'app.steps': 2`, `'app.tool_calls': 1`, `'app.forbidden': 1` and a duration of 1.5 s. The agent's result had one `book_appointment` event with `outcome: 'error'` and a FORBIDDEN `detail`: the model passed a name as the id again.
 
 Live on the box, with `TRACE_EXPORTER=console` set in `.env`, lesson 07's console exporter printed each span as it ended (children first). The trace answered the receptionist's complaint at once: `steps=2 tool_calls=1 forbidden=1`, one `execute_tool book_appointment`, and no `search_patients` at all. The small model skipped the search and passed a name as the id, so the host refused it. Each `chat qwen3:0.6b` call took about 1.1 s, with 439 and 512 input tokens: most of that is the tool definitions, sent on every step.
 

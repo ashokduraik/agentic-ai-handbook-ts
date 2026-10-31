@@ -12,7 +12,7 @@
  *       npx tsx 06-fallback-chain/example.ts --offline  (A only)
  */
 import { generateText, type LanguageModel } from 'ai';
-import { chatModel, env, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, env, section, stripThinking } from '@learn/shared';
 import { CircuitBreaker } from '../05-circuit-breaker/example.ts';
 import { failingModel, scriptedModel } from '../support/mock-models.ts';
 
@@ -53,6 +53,10 @@ const fakeChain = [candidate('primary', failingModel('primary', 503)), candidate
 for (let i = 1; i <= 3; i++) {
   const r = await withFallback(fakeChain, 'Say OK', 5_000);
   console.log(`call ${i}: served by ${r.servedBy}; skipped: ${JSON.stringify(r.skipped)}`);
+  // The full withFallback() result, for the FIRST call only (it is our own helper's shape; the next calls
+  // look the same). Notice `skipped`: one line per model that failed, with why. Log it in production
+  // too; otherwise a dead primary is invisible while the backup answers.
+  if (i === 1) dump('withFallback() result, call 1', r);
 }
 console.log('Call 3 skipped "primary" instantly: its breaker was open after 2 failures.');
 
@@ -63,8 +67,13 @@ const ids = ['model-that-does-not-exist', env.chatModel, env.fallbackModel].filt
 const realChain = ids.map((id) => candidate(id, chatModel(id)));
 for (let i = 1; i <= 3; i++) {
   const r = await withFallback(realChain, 'Reply with just the word OK.', 120_000);
-  console.log(`call ${i}: served by ${r.servedBy}; skipped: ${JSON.stringify(r.skipped)}`);
+  // Same three fields as in part A (shown in full there): we log them and don't dump again.
+  console.log(`call ${i}: served by ${r.servedBy}; skipped: ${JSON.stringify(r.skipped)}; text: ${JSON.stringify(r.text)}`);
 }
 
 section('[B2] Every model gets a 1 ms budget → one clear error');
-await withFallback(realChain, 'Write a long essay about hospitals.', 1).catch((e: Error) => console.log(e.message));
+await withFallback(realChain, 'Write a long essay about hospitals.', 1).catch((e: Error) => {
+  console.log(e.message);
+  // The one error the caller gets: an AggregateError whose message lists every model and why it failed.
+  dump('withFallback() error', e);
+});

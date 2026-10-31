@@ -13,7 +13,7 @@
 import { createMCPClient } from '@ai-sdk/mcp';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { generateText, stepCountIs } from 'ai';
-import { chatModel, modelLabel, section, stripThinking } from '@learn/shared';
+import { chatModel, dump, modelLabel, section, stripThinking } from '@learn/shared';
 import { serverProcess } from '../05-stdio-server/spawn.ts';
 
 const offline = process.argv.includes('--offline');
@@ -28,9 +28,14 @@ try {
   const allowed = { ...definitions, tools: definitions.tools.filter((t) => !t.annotations?.destructiveHint) };
   console.log('tools on the server     :', definitions.tools.map((t) => t.name).join(', '));
   console.log('tools offered to model  :', allowed.tools.map((t) => t.name).join(', '));
+  // The AI SDK client's listTools() returns the same JSON as the raw Client (full shape: post 01),
+  // including the `annotations` we filter on, so there is nothing new to dump here.
 
   // 3. Turn MCP tool definitions into AI SDK tools. Each one's execute() is a tools/call to the server.
   const tools = mcp.toolsFromDefinitions(allowed);
+  // What the AI SDK made of them: one tool per name. Notice: `inputSchema` is now wrapped for the SDK,
+  // and there is an `execute` (hidden by dump, it's a function) that sends tools/call to the server.
+  dump('mcp.toolsFromDefinitions() result', tools, { depth: 3 });
 
   if (!offline) {
     section(`Agent run (${modelLabel()})`);
@@ -49,6 +54,11 @@ try {
       for (const r of step.toolResults) console.log(`        → ${JSON.stringify(r.output).slice(0, 160)}`);
     }
     console.log('\nAnswer:', stripThinking(result.text) || `(empty reply, finishReason=${result.finishReason})`);
+    // Only the MCP-specific parts of the result (full toolCalls / toolResults shapes: lesson 01, post 08).
+    // Notice: each tool result is `dynamic`, and its `output` is the raw MCP tools/call result
+    // ({ content: [...], structuredContent?, isError? }): a failed call is `isError: true`, not an exception.
+    console.log('toolResults:', result.toolResults.map((r) => ({ toolName: r.toolName, dynamic: r.dynamic, isError: (r.output as { isError?: boolean }).isError })));
+    console.log('totalUsage.inputTokens:', result.totalUsage.inputTokens, '| totalUsage.outputTokens:', result.totalUsage.outputTokens);
   }
 } finally {
   await mcp.close(); // also terminates the server child process

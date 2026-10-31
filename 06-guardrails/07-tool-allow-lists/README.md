@@ -89,6 +89,19 @@ await run('[A3] Receptionist asks to delete → tool is not on the allow-list', 
 
 The scripted model asks for `deleteRecord` and then announces success. The tool events show what really happened.
 
+```ts
+      if (part.type === 'tool-call' && part.invalid && NoSuchToolError.isInstance(part.error)) console.log('  ↳ invalid: true, availableTools:', part.error.availableTools);
+```
+
+```ts
+  console.log('  tool parts:      ', result.steps.flatMap((s) => s.content.filter((p) => p.type.startsWith('tool-'))).length);
+```
+
+We don't print the full tool parts here. The ordinary `tool-call` and `tool-result` objects are in [lesson 01, post 08](../../01-foundations-structured-output/08-tool-calling/README.md), and the `invalid: true` call with its `tool-error` was printed in full in [post 03](../03-tool-argument-checks/README.md#step-3--watch-the-events). Two things to compare:
+
+- **A2, authorization said no**: a normal `tool-call` followed by a normal `tool-result` whose `output` is `{ error: 'FORBIDDEN: …' }` (the `tool result:` line). The tool ran and returned a refusal, so the model got a clear answer.
+- **A3, not on the allow-list**: the `tool-call` is `invalid: true` with a `NoSuchToolError` whose `availableTools` is `[ 'getSchedule' ]`, the receptionist's `activeTools`. Then a `tool-error` with the same text. There is **no** `tool-result`: `execute` never ran. The `tool parts` count (2) is that call and that error.
+
 ---
 
 ## Run it
@@ -107,6 +120,23 @@ npm run post:07           # A + B (calls your CHAT_MODEL)
 - **A2**: the doctor asks for P-002 → `{"error":"FORBIDDEN: P-002 is not in your care team"}`.
 - **A3**: the receptionist's model asks for `deleteRecord` → `tool error: … NoSuchToolError …`, **and then says "Record deleted!"**. Nothing was deleted. This is the "don't trust the story" lesson.
 - **B**: with the small test model, the receptionist case made no tool call at all (it only had `getSchedule`) and answered from nothing. Bigger models usually explain that they can't access records.
+
+A3 (always the same: the model is scripted), and B with `qwen3:0.6b` (its answer changes from run to run):
+
+```
+── [A3] Receptionist asks to delete → tool is not on the allow-list ──
+  model asked for: deleteRecord({"patientId":"P-001"})
+  ↳ invalid: true, availableTools: [ 'getSchedule' ]
+  tool error:       AI_NoSuchToolError: Model tried to call unavailable tool 'deleteRecord'. Available tools: getSchedul
+  tool parts:       2
+  model said:       Record deleted!
+
+── [B] Your CHAT_MODEL: receptionist asks for a medical record ──
+  tool parts:       0
+  model said:       The provided tools do not include a function to retrieve a diagnosis from record P-001. Please provide more details or confirm the specific 
+```
+
+In this run of B the small model did explain that it had no such tool. `tool parts: 0` proves the point either way: no tool part at all, so nothing was read.
 
 ## Common gotchas
 

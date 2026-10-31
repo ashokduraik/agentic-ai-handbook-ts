@@ -77,11 +77,28 @@ Open [`example.ts`](./example.ts). Part **A** trims a long chat to a budget with
 
 ```ts
 const tokenizer = getEncoding('o200k_base');
-// Each message costs its text plus a few tokens for the role label; ~4 is a common estimate.
+// Each message costs its text PLUS a few hidden tokens: the chat template wraps every message with
+// markers and a role label (Qwen: <|im_start|>user\n … <|im_end|>\n). ~4 is a common rough estimate;
+// it is a budget, not a bill, so leave a safety margin when the budget is tight. (See the README, Step 1.)
 const tokensOf = (m: ModelMessage) => tokenizer.encode(String(m.content)).length + 4;
 ```
 
-To fit a budget you need a ruler. We reuse the local tokenizer from post 01 and add ~4 tokens per message for the hidden role label. It is an estimate, which is all a budget needs.
+To fit a budget you need a ruler. We reuse the local tokenizer from post 01: `getEncoding('o200k_base')` loads OpenAI's public encoding from the `js-tiktoken` package. Post 01 explains [what an encoding is, why we use `js-tiktoken`, and why this count is only an estimate for Qwen](../01-llm-and-tokens/README.md#tokenizers-and-encodings-and-why-we-use-js-tiktoken).
+
+**Why `+ 4`?** The model never receives your messages as separate objects. Before the call, the provider glues the whole chat into one long text using the model's **chat template**, and the template wraps every message in special markers. For Qwen models, one user message becomes:
+
+```
+<|im_start|>user
+Who is in bed 12?<|im_end|>
+```
+
+That wrapper is `<|im_start|>` + `user` + a newline + `<|im_end|>` + a newline. That makes **5 tokens** on top of your text, for every message. (We checked this with Qwen3's real tokenizer, and against Ollama's own count: each extra message added exactly its text plus 5.) OpenAI's guide to counting chat tokens uses **3** per message for its models. So **~4 is a middle-of-the-road guess**, not an exact number for any one model. There is also a small fixed cost once per call, such as the `<|im_start|>assistant` line that starts the model's reply.
+
+That is fine, because `tokensOf` is a **budget ruler, not a bill**:
+
+- The text part is already an estimate (`o200k_base` is not Qwen's tokenizer; see post 01).
+- So leave a **safety margin**. Here we already keep `RESERVED_FOR_ANSWER` free. In real code, also budget for 10–20 % less than the true window.
+- If you want this ruler tuned to Qwen, change `+ 4` to `+ 5`. For exact numbers, use your model's own tokenizer, or read `usage.inputTokens` after the call (part B).
 
 ### Step 2 — set the budget, and remember the answer
 
@@ -134,6 +151,14 @@ It is called with `BUDGET - RESERVED_FOR_ANSWER`, so room for the answer is prot
 const fitted = fitToBudget(system, history, BUDGET - RESERVED_FOR_ANSWER);
 ```
 
+Then we look at what `fitToBudget` actually returned, using the toolkit's `dump()` helper ([what it is](../../shared/README.md#dumplabel-value--print-the-full-returned-value)):
+
+```ts
+dump(`fitToBudget() result — first 3 of ${fitted.length} messages`, fitted.slice(0, 3));
+```
+
+It's an ordinary `ModelMessage[]`, the exact type you pass as `messages` to a model call. The first item is the system message, the second is our "omitted" note (a `user` message, so the model reads it as context), and from the third on come the newest turns in their original order. Only three are printed to keep the output short; the other 17 look like the third.
+
 ### Step 5 — prove the model has no memory
 
 ```ts
@@ -158,6 +183,24 @@ const withHistory = await generateText({
 
 Same model, same question. The **only** difference is that we re-sent the earlier turns. That is all "chat memory" is.
 
+After each call the file prints just the one field we want to compare, `usage.inputTokens`, which is how many tokens we sent:
+
+```ts
+// `usage.inputTokens` = how many tokens we sent. Here only the question was sent, so it is small.
+// (The full generateText() result was shown in post 00, so we only print the field we want to compare.)
+console.log('Input tokens without history:', withoutHistory.usage.inputTokens);
+```
+
+```ts
+// Compare `usage.inputTokens` with the call above. It is larger, because we re-sent the earlier
+// turns — memory is paid for in input tokens on every call.
+// (In the full result, `response.messages` holds the assistant turn you would append to the history
+// for the next call; see post 00 for the whole object.)
+console.log('Input tokens with history:   ', withHistory.usage.inputTokens);
+```
+
+The call with history sends more tokens (58 against 30 in the run below), because the earlier turns travel with it. **Memory is paid for in input tokens, on every call.** We saw the full `generateText()` result in [post 00](../00-course-toolkit/README.md#step-4--look-at-everything-the-call-returned), including `response.messages`, the assistant turn you would append to the history for the next call.
+
 ---
 
 ## Run it
@@ -176,6 +219,34 @@ npm run post:02           # part A + B (calls your CHAT_MODEL)
 - **Part B**:
   - *Without history* the model does not know who is in bed 12. It guesses or invents a name.
   - *With history* it answers "Rahul".
+  - Each call also prints `usage.inputTokens`. The call with history sends more.
+
+A real run with a small `qwen3:0.6b` (long text trimmed at `…`):
+
+```
+── [A] A 40-turn chat does not fit a 1,500-token budget — so we choose what stays
+Before: 41 messages ≈ 2614 tokens  (budget 1500, of which 300 reserved for the answer)
+After:  20 messages ≈ 1199 tokens
+Kept first : You are a ward-round assistant. Be brief.
+Then a note: [22 earlier messages omitted to fit the context window]
+▼ fitToBudget() result — first 3 of 20 messages
+[
+  { role: 'system', content: 'You are a ward-round assistant. Be brief.' },
+  { role: 'user', content: '[22 earlier messages omitted to fit the context window]' },
+  {
+    role: 'user',
+    content: 'Turn 22: details about bed allocation and lab results details about bed allocation …'
+  }
+]
+
+── [B] No memory between calls — unless you re-send the history
+Without history: None of the information provided indicates who is in bed 12.
+Input tokens without history: 30
+With history:    Rahul
+Input tokens with history:    58
+```
+
+Part A is the same on every machine. In part B the wording, ids and token counts depend on your model; the point is that `inputTokens` grows when you re-send history.
 
 ## Common gotchas
 

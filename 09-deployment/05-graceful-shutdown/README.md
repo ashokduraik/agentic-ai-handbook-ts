@@ -58,6 +58,21 @@ Open [`example.ts`](./example.ts). The demo starts a 1-second request, then send
 
 `.unref()` means this timer alone won't keep the process alive.
 
+### Step 4 — look at both requests
+
+The in-flight request is logged as just its `status` and text: the full HTTP response shape is in [post 01](../01-validate-at-the-edge/README.md#step-4--look-at-the-full-response). The error the late request gets is new, so the demo dumps that one whole. `dump()` comes from `@learn/shared` ([how it prints](../../shared/README.md#dumplabel-value--print-the-full-returned-value)).
+
+```ts
+    // Notice status 200 and the whole text: draining let the request finish instead of cutting the
+    // connection. Just those two fields: the full HTTP response shape is in lesson 09, post 01.
+    console.log(`${at()}  in-flight request → ${r.status} "${await r.text()}"`);
+```
+
+```ts
+      // The error fetch threw. Notice the useful part is in `cause`: code ECONNREFUSED, nobody listening.
+      dump('new request: fetch error', e);
+```
+
 ---
 
 ## Run it
@@ -76,12 +91,27 @@ npm run post:05           # no model needed
 ```
   206 ms  sending SIGTERM (what Kubernetes does on a rolling update)
 {"level":"info","msg":"SIGTERM: draining"}
-  259 ms  new request → refused (connect ECONNREFUSED 127.0.0.1:40857)
- 1021 ms  in-flight request → 200 "here is your answer"
+  260 ms  new request → refused (connect ECONNREFUSED 127.0.0.1:42239)
+▼ new request: fetch error
+TypeError {
+  name: 'TypeError',
+  message: 'fetch failed',
+  cause: Error {
+    name: 'Error',
+    message: 'connect ECONNREFUSED 127.0.0.1:42239',
+    errno: -111,
+    code: 'ECONNREFUSED',
+    syscall: 'connect',
+    address: '127.0.0.1',
+    port: 42239
+  }
+}
+  (hidden for readability: cause.stack, stack — set SHOW_RAW=1 to print everything)
+ 1011 ms  in-flight request → 200 "here is your answer"
 {"level":"info","msg":"drained, exiting"}
 ```
 
-The answer that was being written still arrived, after the signal.
+The answer that was being written still arrived, after the signal: status 200 and the whole text. The new request never reached the server. fetch only says `fetch failed`; the reason is in `cause`: `code: 'ECONNREFUSED'` means nothing was listening on that port any more.
 
 ## Common gotchas
 
