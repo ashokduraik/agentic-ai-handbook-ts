@@ -1,11 +1,15 @@
 /**
  * Post 06 — Embeddings   (read the blog post first: 06-embeddings/README.md)
  *
- * An embedding turns a text into a list of numbers (a vector) that captures its MEANING.
- * Texts with similar meaning get vectors pointing in a similar direction; we measure that
- * with cosine similarity (1 = same direction, 0 = unrelated).
+ * An embedding is a vector (an ordered, fixed-length list of numbers) that captures a text's MEANING.
+ * An embedding model is the same kind of network as a chat LLM, minus the "next-token" head:
+ * it reads the text once and returns one fixed-length vector (no text is generated).
+ * Our code only describes the model (embeddingModel()); embed/embedMany send an HTTP request
+ * (POST /api/embed for Ollama) and Ollama or a cloud provider runs the model.
+ * Texts with similar meaning get vectors pointing the same way; cosine similarity measures that
+ * (1 = same direction, ~0 = unrelated).
  *
- * Run:  npx tsx 06-embeddings/example.ts            (part A + parts B/C with your EMBED_MODEL)
+ * Run:  npx tsx 06-embeddings/example.ts            (part A + parts B/C/D with your EMBED_MODEL)
  *       npx tsx 06-embeddings/example.ts --offline  (part A only: cosine similarity on tiny hand-made vectors)
  */
 import { cosineSimilarity, embed, embedMany } from 'ai';
@@ -13,7 +17,7 @@ import { cosineSimilarity, embed, embedMany } from 'ai';
 import { dump, embeddingModel, section } from '@learn/shared';
 
 // ---------------------------------------------------------------------------
-// Part A: the maths, with 3-number vectors you can check by hand
+// Part A: cosine similarity on 3-number vectors you can read
 // ---------------------------------------------------------------------------
 section('[A] Cosine similarity on tiny hand-made vectors (no model)');
 // Pretend the three numbers mean [heart-related, billing-related, children-related].
@@ -69,3 +73,13 @@ dump('ranked (search hits, best first)', ranked);
 console.log('Question:', query);
 ranked.forEach((r, i) => console.log(`  ${i + 1}. ${r.score.toFixed(2)}  ${r.s}`));
 console.log('Look for: the two chest sentences rank at the top, even though they share few words with the question.');
+
+// ---------------------------------------------------------------------------
+// Part D: embed the same text twice — do we get the same vector?
+// ---------------------------------------------------------------------------
+section('[D] The same text twice gives the same vector');
+const s1 = embeddings[0]!;
+// Embed sentence 1 again (a second, separate request) and compare it with the vector from Part B.
+const again = await embed({ model: embeddingModel(), value: sentences[0]! });
+const biggestGap = Math.max(...s1.map((x, i) => Math.abs(x - again.embedding[i]!)));
+console.log(`S1 embedded again: cosine with the first vector = ${cosineSimilarity(s1, again.embedding).toFixed(4)}, biggest difference in any one number = ${biggestGap.toFixed(6)}`);
